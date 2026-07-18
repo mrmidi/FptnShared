@@ -1,5 +1,7 @@
 import Foundation
+#if !CLI_BUILD
 import FptnSharedCore
+#endif
 
 public enum Fixtures {
     public static func sampleServer() -> VPNServer {
