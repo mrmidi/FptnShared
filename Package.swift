@@ -13,8 +13,7 @@ let package = Package(
         .library(name: "FptnSharedTunnel", targets: ["FptnSharedTunnel"]),
         .library(name: "FptnSharedTestSupport", targets: ["FptnSharedTestSupport"]),
         .library(name: "FptnServerSelection", targets: ["FptnServerSelection"]),
-        .library(name: "FptnConnectionOrchestration", targets: ["FptnConnectionOrchestration"]),
-        .executable(name: "fptn-selector", targets: ["FptnSelectionCLI"])
+        .library(name: "FptnConnectionOrchestration", targets: ["FptnConnectionOrchestration"])
     ],
     targets: [
         .target(name: "FptnSharedCore"),
@@ -33,10 +32,6 @@ let package = Package(
         .target(
             name: "FptnSharedTestSupport",
             dependencies: ["FptnSharedCore", "FptnServerSelection", "FptnConnectionOrchestration"]
-        ),
-        .executableTarget(
-            name: "FptnSelectionCLI",
-            dependencies: ["FptnSharedCore", "FptnServerSelection", "FptnSharedTestSupport", "FptnConnectionOrchestration"]
         ),
         .testTarget(
             name: "FptnSharedCoreTests",

@@ -11,7 +11,11 @@ public enum ServerHealthOutcome: String, Sendable, Codable {
     case success
     case connectionTimeout
     case connectionRefused
+    case tlsFailure
+    case certificateMismatch
+    case malformedResponse
     case authenticationRejected
+    case rateLimited
     case serverError
     case networkUnreachable
     case cancelled
@@ -45,8 +49,14 @@ public struct ServerHealthObservation: Sendable, Codable {
                 case .authenticationRejected, .authorizationRejected: return .authenticationRejected
                 case .connectionTimeout: return .connectionTimeout
                 case .connectionRefused: return .connectionRefused
+                case .connectionReset: return .connectionRefused
+                case .tlsHandshake, .fakeHandshake: return .tlsFailure
+                case .certificateMismatch: return .certificateMismatch
+                case .malformedLoginResponse, .malformedBootstrapResponse: return .malformedResponse
+                case .rateLimited: return .rateLimited
                 case .serverError: return .serverError
                 case .cancelled: return .cancelled
+                case .dnsResolution: return .networkUnreachable
                 default: return .networkUnreachable
                 }
             }()

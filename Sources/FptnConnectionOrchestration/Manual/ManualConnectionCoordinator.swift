@@ -37,6 +37,7 @@ public actor ManualConnectionCoordinator: ManualConnectionCoordinating {
             server: request.server,
             credentials: request.credentials,
             context: request.bootstrapContext,
+            attempt: BootstrapAttemptContext(runID: UUID(), queuePosition: 0),
             policy: request.bootstrapPolicy
         )
 

@@ -8,18 +8,8 @@ import Foundation
 import FptnSharedCore
 import FptnServerSelection
 
-public protocol Clock: Sendable {
-    func now() -> ContinuousClock.Instant
-    func sleep(for duration: Duration) async throws
-}
-
-public struct SystemClock: Clock {
-    public init() {}
-    public func now() -> ContinuousClock.Instant { ContinuousClock.now }
-    public func sleep(for duration: Duration) async throws {
-        try await Task.sleep(for: duration)
-    }
-}
+public typealias Clock = FptnSharedCore.Clock
+public typealias SystemClock = FptnSharedCore.SystemClock
 
 public enum TunnelStartError: Error, Sendable {
     case refused(String)

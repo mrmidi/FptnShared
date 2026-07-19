@@ -26,6 +26,7 @@ public actor FakeServerBootstrapping: ServerBootstrapping {
         server: VPNServer,
         credentials: Credentials,
         context: BootstrapContext,
+        attempt: BootstrapAttemptContext,
         policy: BootstrapPolicy
     ) async -> ServerBootstrapAttempt {
         callCount += 1

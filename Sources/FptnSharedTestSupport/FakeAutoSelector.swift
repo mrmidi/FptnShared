@@ -11,27 +11,36 @@ import FptnServerSelection
 #endif
 
 public actor FakeAutoSelector: AutoSelecting {
-    private var _onSelect: ((SelectionRequest) async -> SelectionOutcome)?
+    private var _onSelect: ((SelectionRequest) async -> SelectionRun)?
     public private(set) var callCount = 0
     public private(set) var lastRequest: SelectionRequest?
 
-    public init(onSelect: ((SelectionRequest) async -> SelectionOutcome)? = nil) {
+    public init(onSelect: ((SelectionRequest) async -> SelectionRun)? = nil) {
         self._onSelect = onSelect
     }
 
-    public func setOnSelect(_ handler: ((SelectionRequest) async -> SelectionOutcome)?) {
+    public func setOnSelect(_ handler: ((SelectionRequest) async -> SelectionRun)?) {
         self._onSelect = handler
     }
 
-    public func select(_ request: SelectionRequest) async -> SelectionOutcome {
+    public func select(_ request: SelectionRequest) async -> SelectionRun {
         callCount += 1
         lastRequest = request
         if let handler = _onSelect {
             return await handler(request)
         }
-        return SelectionOutcome(
+        return SelectionRun(
             result: .networkUnavailable,
-            attempts: []
+            observations: [],
+            statistics: SelectionRunStatistics(
+                candidateCount: request.servers.count,
+                startedCount: 0,
+                completedCount: 0,
+                neverStartedCount: request.servers.count,
+                peakActiveProbes: 0,
+                timeToWinnerMs: nil,
+                deadlineTriggered: false
+            )
         )
     }
 }

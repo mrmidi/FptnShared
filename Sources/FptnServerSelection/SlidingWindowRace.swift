@@ -9,139 +9,160 @@ import Foundation
 import FptnSharedCore
 #endif
 
-/// Coordinates the concurrency-limited sliding-window connection race.
-/// Implemented using Swift 6 Structured Concurrency to ensure compile-time safety and Sendability.
 public struct SlidingWindowRace: Sendable {
-    
     public init() {}
 
-    /// Performs a sliding-window race across the provided candidates list.
-    ///
-    /// - Parameters:
-    ///   - candidates: The ordered list of servers to race.
-    ///   - credentials: The login credentials.
-    ///   - context: The current probe network and bypass strategy context.
-    ///   - limit: The maximum number of simultaneous network probes allowed (defaults to 4).
-    ///   - timeout: The timeout for each individual server probe (defaults to 5 seconds).
-    ///   - overallTimeout: The maximum time allowed for the entire race (defaults to 30 seconds).
-    ///   - probe: The probe engine implementing `ServerBootstrapProbing`.
-    /// - Returns: The outcome of the selection race.
     public func run(
         candidates: [VPNServer],
         credentials: Credentials,
-        context: ProbeContext,
-        limit: Int = 4,
-        timeout: Duration = .seconds(5),
-        overallTimeout: Duration = .seconds(30),
-        probe: any ServerBootstrapProbing
-    ) async -> AutoSelectionResult {
-        
+        context: BootstrapContext,
+        bootstrapPolicy: BootstrapPolicy,
+        selectionPolicy: SelectionPolicy,
+        clock: any Clock = SystemClock(),
+        bootstrapper: any ServerBootstrapping
+    ) async -> RaceExecution {
+        let maxActive = max(1, selectionPolicy.maximumActiveProbes)
+        _ = bootstrapPolicy.candidateDeadline  // enforced per-candidate by native timeout
+        _ = selectionPolicy.selectionDeadline // enforced by soft-deadline timer
+        let runID = UUID()
+        let clockNow = clock.now()
+
         guard !candidates.isEmpty else {
-            return .allCandidatesFailed(SelectionFailureSummary(
-                attemptedCount: 0,
-                failuresByKind: [:],
-                representativeFailure: nil
-            ))
+            return RaceExecution(
+                winner: nil,
+                attempts: [],
+                statistics: RaceStatistics(startedCount: 0, completedCount: 0, neverStartedCount: 0, peakActiveProbes: 0, timeToWinnerMs: nil),
+                termination: .allCompleted
+            )
         }
 
-        // 1. Run the entire task group inside a parent task we can cancel
-        let raceTask = Task {
-            await withTaskGroup(of: ServerBootstrapAttempt.self) { group -> AutoSelectionResult in
-                var index = 0
-                var failures: [ServerProbeFailure] = []
-                var winner: ServerBootstrapResult? = nil
-                
-                // Seed initial batch
-                let initialCount = min(limit, candidates.count)
-                while index < initialCount {
-                    let server = candidates[index]
-                    let pos = index
-                    group.addTask {
-                        await probe.probe(
-                            server: server,
-                            credentials: credentials,
-                            context: context,
-                            timeout: timeout,
-                            queuePosition: pos
-                        )
-                    }
-                    index += 1
-                }
-                
-                // Sliding window loop
-                for await attempt in group {
-                    if Task.isCancelled {
-                        break
-                    }
-                    
-                    switch attempt {
-                    case .success(let bootstrap):
-                        winner = bootstrap
-                        group.cancelAll()
-                        break
-                        
-                    case .failure(let failure):
-                        failures.append(failure)
-                        
-                        if index < candidates.count && !Task.isCancelled {
-                            let nextServer = candidates[index]
-                            let pos = index
-                            group.addTask {
-                                await probe.probe(
-                                    server: nextServer,
-                                    credentials: credentials,
-                                    context: context,
-                                    timeout: timeout,
-                                    queuePosition: pos
-                                )
-                            }
-                            index += 1
+        let result = await withTaskCancellationHandler(
+            operation: {
+                await withTaskGroup(of: RaceAttemptRecord.self) { group -> RaceExecution in
+                    var index = 0
+                    var activeCount = 0
+                    var peakActive = 0
+                    var winner: ServerBootstrapResult? = nil
+                    var records: [RaceAttemptRecord] = []
+                    var deadlineTriggered = false
+
+                    let initialCount = min(maxActive, candidates.count)
+                    while index < initialCount {
+                        let server = candidates[index]
+                        let pos = index
+                        activeCount += 1
+                        group.addTask {
+                            let startedAt = clock.now()
+                            let attempt = await bootstrapper.bootstrap(
+                                server: server,
+                                credentials: credentials,
+                                context: context,
+                                attempt: BootstrapAttemptContext(runID: runID, queuePosition: pos),
+                                policy: bootstrapPolicy
+                            )
+                            let completedAt = clock.now()
+                            return RaceAttemptRecord(
+                                serverID: server.id,
+                                queuePosition: pos,
+                                result: attempt,
+                                startedAt: startedAt,
+                                completedAt: completedAt
+                            )
                         }
+                        index += 1
                     }
-                    
-                    if winner != nil {
-                        break
+                    peakActive = activeCount
+
+                    for await record in group {
+                        activeCount -= 1
+                        records.append(record)
+
+                        if Task.isCancelled {
+                            deadlineTriggered = true
+                            if !group.isEmpty {
+                                group.cancelAll()
+                            }
+                            break
+                        }
+
+                        switch record.result {
+                        case .success(let bootstrap):
+                            winner = bootstrap
+                            group.cancelAll()
+                            break
+
+                        case .failure:
+                            if index < candidates.count && !Task.isCancelled {
+                                let server = candidates[index]
+                                let pos = index
+                                activeCount += 1
+                                peakActive = max(peakActive, activeCount)
+                                group.addTask {
+                                    let startedAt = clock.now()
+                                    let attempt = await bootstrapper.bootstrap(
+                                        server: server,
+                                        credentials: credentials,
+                                        context: context,
+                                        attempt: BootstrapAttemptContext(runID: runID, queuePosition: pos),
+                                        policy: bootstrapPolicy
+                                    )
+                                    let completedAt = clock.now()
+                                    return RaceAttemptRecord(
+                                        serverID: server.id,
+                                        queuePosition: pos,
+                                        result: attempt,
+                                        startedAt: startedAt,
+                                        completedAt: completedAt
+                                    )
+                                }
+                                index += 1
+                            }
+                        }
+
+                        if winner != nil { break }
                     }
+
+                    let neverStarted = candidates.count - index
+                    let completedRecords = records.count
+                    let timeToWinner: Int? = {
+                        guard let winnerRecord = records.first(where: {
+                            if case .success = $0.result { return true } else { return false }
+                        }) else { return nil }
+                        let elapsed = winnerRecord.completedAt - clockNow
+                        return elapsed.millisecondsMs
+                    }()
+
+                    let termination: RaceTermination = {
+                        if winner != nil { return .winner }
+                        if Task.isCancelled { return deadlineTriggered ? .selectionDeadline : .callerCancelled }
+                        return .allCompleted
+                    }()
+
+                    return RaceExecution(
+                        winner: winner,
+                        attempts: records,
+                        statistics: RaceStatistics(
+                            startedCount: index,
+                            completedCount: completedRecords,
+                            neverStartedCount: neverStarted,
+                            peakActiveProbes: peakActive,
+                            timeToWinnerMs: timeToWinner
+                        ),
+                        termination: termination
+                    )
                 }
-                
-                if let result = winner {
-                    return .success(result)
-                }
-                
-                if Task.isCancelled && winner == nil {
-                    return .cancelled
-                }
-                
-                var failuresByKind: [String: Int] = [:]
-                for f in failures {
-                    failuresByKind[f.kind.rawValue, default: 0] += 1
-                }
-                
-                let summary = SelectionFailureSummary(
-                    attemptedCount: failures.count,
-                    failuresByKind: failuresByKind,
-                    representativeFailure: failures.first
-                )
-                return .allCandidatesFailed(summary)
+            },
+            onCancel: {
+                // Parent task cancellation propagates through the task group
             }
-        }
-        
-        // 2. Start the overall deadline timer task
-        let timerTask = Task {
-            do {
-                try await Task.sleep(for: overallTimeout)
-                raceTask.cancel()
-            } catch {}
-        }
-        
-        // 3. Wait for the race to finish, then cleanup the timer
-        let outcome = await raceTask.value
-        timerTask.cancel()
-        return outcome
+        )
+
+        return result
     }
 }
 
-// Helper extension on Array
-private extension Array {
-    var empty: Bool { isEmpty }
+private extension Duration {
+    var millisecondsMs: Int {
+        Int(Double(components.seconds) * 1000 + Double(components.attoseconds) / 1e15)
+    }
 }

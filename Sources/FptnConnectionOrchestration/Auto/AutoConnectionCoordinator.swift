@@ -37,16 +37,17 @@ public actor AutoConnectionCoordinator: AutoConnectionCoordinating {
             servers: request.servers,
             credentials: request.credentials,
             context: request.bootstrapContext,
-            policy: request.bootstrapPolicy
+            bootstrapPolicy: request.bootstrapPolicy,
+            selectionPolicy: .production
         )
 
-        let outcome = await selector.select(selectionRequest)
+        let run = await selector.select(selectionRequest)
 
         guard attempt == generation, !Task.isCancelled else {
             return .cancelled
         }
 
-        switch outcome.result {
+        switch run.result {
         case .success(let bootstrap):
             state = .startingTunnel
             let episodeID = ConnectionEpisodeID()

@@ -54,11 +54,22 @@ public struct BootstrapPolicy: Sendable, Codable {
     )
 }
 
+public struct BootstrapAttemptContext: Sendable {
+    public let runID: UUID
+    public let queuePosition: Int
+
+    public init(runID: UUID, queuePosition: Int) {
+        self.runID = runID
+        self.queuePosition = queuePosition
+    }
+}
+
 public protocol ServerBootstrapping: Sendable {
     func bootstrap(
         server: VPNServer,
         credentials: Credentials,
         context: BootstrapContext,
+        attempt: BootstrapAttemptContext,
         policy: BootstrapPolicy
     ) async -> ServerBootstrapAttempt
 }
