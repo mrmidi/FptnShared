@@ -31,6 +31,18 @@ public actor FakeServerBootstrapping: ServerBootstrapping {
     ) async -> ServerBootstrapAttempt {
         callCount += 1
         calledServers.append(server.id)
+        if Task.isCancelled {
+            return .failure(ServerProbeFailure(
+                server: server, kind: .cancelled,
+                metrics: ProbeMetrics(serverID: server.id, queuePosition: attempt.queuePosition,
+                    queuedAtMs: 0, startedAtMs: 0, completedAtMs: 0,
+                    dnsMs: nil, tcpConnectMs: nil, fakeHandshakeMs: nil,
+                    tlsHandshakeMs: nil, loginHTTPMs: nil, bootstrapHTTPMs: nil,
+                    totalMs: 0, cancellationRequestedAtMs: 0, cancellationCompletedAtMs: 0,
+                    outcome: .cancelled),
+                safeDiagnostic: "cancelled"
+            ))
+        }
         if let handler = _onBootstrap {
             return await handler(server, credentials)
         }

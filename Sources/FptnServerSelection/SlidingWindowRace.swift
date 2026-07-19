@@ -89,7 +89,21 @@ public struct SlidingWindowRace: Sendable {
                         case .success(let bootstrap):
                             winner = bootstrap
                             group.cancelAll()
-                            break
+                            return RaceExecution(
+                                winner: winner,
+                                attempts: records,
+                                statistics: RaceStatistics(
+                                    startedCount: index,
+                                    completedCount: records.count,
+                                    neverStartedCount: candidates.count - index,
+                                    peakActiveProbes: peakActive,
+                                    timeToWinnerMs: {
+                                        let elapsed = record.completedAt - clockNow
+                                        return elapsed.millisecondsMs
+                                    }()
+                                ),
+                                termination: .winner
+                            )
 
                         case .failure:
                             if index < candidates.count && !Task.isCancelled {

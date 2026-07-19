@@ -40,6 +40,10 @@ let package = Package(
         .testTarget(
             name: "FptnConnectionOrchestrationTests",
             dependencies: ["FptnConnectionOrchestration", "FptnSharedTestSupport"]
+        ),
+        .testTarget(
+            name: "FptnServerSelectionTests",
+            dependencies: ["FptnServerSelection", "FptnSharedTestSupport"]
         )
     ]
 )
