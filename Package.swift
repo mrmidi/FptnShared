@@ -13,6 +13,7 @@ let package = Package(
         .library(name: "FptnSharedTunnel", targets: ["FptnSharedTunnel"]),
         .library(name: "FptnSharedTestSupport", targets: ["FptnSharedTestSupport"]),
         .library(name: "FptnServerSelection", targets: ["FptnServerSelection"]),
+        .library(name: "FptnConnectionOrchestration", targets: ["FptnConnectionOrchestration"]),
         .executable(name: "fptn-selector", targets: ["FptnSelectionCLI"])
     ],
     targets: [
@@ -22,20 +23,28 @@ let package = Package(
             dependencies: ["FptnSharedCore"]
         ),
         .target(
-            name: "FptnSharedTestSupport",
-            dependencies: ["FptnSharedCore", "FptnServerSelection"]
-        ),
-        .target(
             name: "FptnServerSelection",
             dependencies: ["FptnSharedCore"]
         ),
+        .target(
+            name: "FptnConnectionOrchestration",
+            dependencies: ["FptnSharedCore", "FptnServerSelection"]
+        ),
+        .target(
+            name: "FptnSharedTestSupport",
+            dependencies: ["FptnSharedCore", "FptnServerSelection", "FptnConnectionOrchestration"]
+        ),
         .executableTarget(
             name: "FptnSelectionCLI",
-            dependencies: ["FptnSharedCore", "FptnServerSelection", "FptnSharedTestSupport"]
+            dependencies: ["FptnSharedCore", "FptnServerSelection", "FptnSharedTestSupport", "FptnConnectionOrchestration"]
         ),
         .testTarget(
             name: "FptnSharedCoreTests",
             dependencies: ["FptnSharedCore", "FptnSharedTestSupport"]
+        ),
+        .testTarget(
+            name: "FptnConnectionOrchestrationTests",
+            dependencies: ["FptnConnectionOrchestration", "FptnSharedTestSupport"]
         )
     ]
 )

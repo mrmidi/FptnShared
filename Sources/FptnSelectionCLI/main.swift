@@ -106,6 +106,7 @@ func runSimulation(scenarioPath: String) async {
     printDiagnostics(result: result, totalElapsedMs: totalElapsedMs)
 }
 
+#if CLI_BUILD
 func runRealRace(configPath: String, concurrency: Int) async {
     let url = URL(fileURLWithPath: configPath)
     guard let dataStr = try? String(contentsOf: url, encoding: .utf8) else {
@@ -181,6 +182,7 @@ func runRealRace(configPath: String, concurrency: Int) async {
     
     printDiagnostics(result: result, totalElapsedMs: totalElapsedMs)
 }
+#endif
 
 func printDiagnostics(result: AutoSelectionResult, totalElapsedMs: Int) {
     print("\n==================================================")
@@ -243,6 +245,7 @@ if command == "simulate" {
         exit(1)
     }
 } else if command == "race" {
+    #if CLI_BUILD
     let option = args[2]
     let configPath = args[3]
     
@@ -257,6 +260,10 @@ if command == "simulate" {
         printUsage()
         exit(1)
     }
+    #else
+    print("Error: The 'race' command requires C++ Interop and is not supported in the standard build.")
+    exit(1)
+    #endif
 } else {
     printUsage()
     exit(1)

@@ -1,3 +1,4 @@
+#if CLI_BUILD
 /*=============================================================================
 Copyright (c) 2026 Aleksandr Shabelnikov
 
@@ -5,10 +6,6 @@ Distributed under the MIT License (https://opensource.org/licenses/MIT)
 =============================================================================*/
 
 import Foundation
-#if !CLI_BUILD
-import FptnSharedCore
-import FptnServerSelection
-#endif
 
 /// Standard struct representing the JSON login response from the FPTN server.
 private struct LoginResponse: Codable {
@@ -179,3 +176,4 @@ public final class NativeServerBootstrapProbe: ServerBootstrapProbing, @unchecke
         ))
     }
 }
+#endif
