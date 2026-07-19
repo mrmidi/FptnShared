@@ -29,7 +29,7 @@ public struct SelectionPolicy: Sendable, Codable {
 
     public static let production = SelectionPolicy(
         maximumActiveProbes: 4,
-        selectionDeadline: .seconds(30),
+        selectionDeadline: .seconds(15),
         authenticationQuorum: 2,
         rateLimitQuorum: 3,
         explorationSlots: 1
