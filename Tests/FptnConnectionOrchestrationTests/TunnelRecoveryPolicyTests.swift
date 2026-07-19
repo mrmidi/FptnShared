@@ -7,6 +7,7 @@ Distributed under the MIT License (https://opensource.org/licenses/MIT)
 import Foundation
 import Testing
 import FptnSharedCore
+import FptnServerSelection
 import FptnConnectionOrchestration
 
 struct TunnelRecoveryPolicyTests {
@@ -25,10 +26,41 @@ struct TunnelRecoveryPolicyTests {
         #expect(decoded == policy)
     }
 
-    @Test func missingPolicy_decodesSafelyAsNone() throws {
-        let json = "{}".data(using: .utf8)!
-        let decoded = try? JSONDecoder().decode(TunnelRecoveryPolicy.self, from: json)
-        #expect(decoded == nil)
+    @Test func missingPolicy_defaultsToNone() throws {
+        let json = """
+        {
+            "schemaVersion": 1,
+            "episodeID": "550E8400-E29B-41D4-A716-446655440000",
+            "serverHost": "1.1.1.1",
+            "serverPort": 443,
+            "accessToken": "tok",
+            "dnsIPv4": "10.0.0.1",
+            "sni": "sni.test",
+            "md5Fingerprint": "fp",
+            "censorshipStrategy": "sni-reality-chrome147"
+        }
+        """.data(using: .utf8)!
+        let decoded = try JSONDecoder().decode(TunnelStartupConfiguration.self, from: json)
+        #expect(decoded.recoveryPolicy == .none)
+    }
+
+    @Test func unknownSchemaVersion_failsDecoding() throws {
+        let json = """
+        {
+            "schemaVersion": 99,
+            "episodeID": "550E8400-E29B-41D4-A716-446655440000",
+            "serverHost": "1.1.1.1",
+            "serverPort": 443,
+            "accessToken": "tok",
+            "dnsIPv4": "10.0.0.1",
+            "sni": "sni.test",
+            "md5Fingerprint": "fp",
+            "censorshipStrategy": "sni-reality-chrome147"
+        }
+        """.data(using: .utf8)!
+        #expect(throws: DecodingError.self) {
+            try JSONDecoder().decode(TunnelStartupConfiguration.self, from: json)
+        }
     }
 }
 

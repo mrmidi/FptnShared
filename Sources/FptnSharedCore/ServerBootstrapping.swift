@@ -54,26 +54,11 @@ public struct BootstrapPolicy: Sendable, Codable {
     )
 }
 
-public struct ServerBootstrapFailure: Sendable, Equatable {
-    public let kind: String
-    public let message: String
-
-    public init(kind: String, message: String) {
-        self.kind = kind
-        self.message = message
-    }
-}
-
-public enum ServerBootstrappingResult: Sendable {
-    case success(ServerBootstrapResult)
-    case failure(ServerBootstrapFailure)
-}
-
 public protocol ServerBootstrapping: Sendable {
     func bootstrap(
         server: VPNServer,
         credentials: Credentials,
         context: BootstrapContext,
         policy: BootstrapPolicy
-    ) async -> ServerBootstrappingResult
+    ) async -> ServerBootstrapAttempt
 }

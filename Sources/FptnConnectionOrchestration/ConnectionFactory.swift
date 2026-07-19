@@ -8,23 +8,35 @@ import Foundation
 import FptnSharedCore
 import FptnServerSelection
 
+public func makeManualCoordinator(
+    deps: ManualConnectionDependencies
+) -> any ConnectionCoordinating {
+    ManualConnectionCoordinator(
+        bootstrapper: deps.bootstrapper,
+        tunnelController: deps.tunnelController,
+        clock: deps.clock
+    )
+}
+
+public func makeAutoCoordinator(
+    deps: AutoConnectionDependencies
+) -> any ConnectionCoordinating {
+    AutoConnectionCoordinator(
+        selector: deps.selector,
+        tunnelController: deps.tunnelController,
+        clock: deps.clock
+    )
+}
+
 public func makeCoordinator(
     for intent: ConnectionIntent,
-    deps: ConnectionDependencies
+    manualDeps: ManualConnectionDependencies,
+    autoDeps: AutoConnectionDependencies
 ) -> any ConnectionCoordinating {
     switch intent {
-    case .manual(let server):
-        ManualConnectionCoordinator(
-            server: server,
-            bootstrapper: deps.nativeBootstrap,
-            tunnelController: deps.tunnelController,
-            clock: deps.clock
-        )
+    case .manual:
+        makeManualCoordinator(deps: manualDeps)
     case .auto:
-        AutoConnectionCoordinator(
-            selector: deps.autoSelector,
-            tunnelController: deps.tunnelController,
-            clock: deps.clock
-        )
+        makeAutoCoordinator(deps: autoDeps)
     }
 }

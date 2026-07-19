@@ -27,23 +27,36 @@ public enum TunnelStartError: Error, Sendable {
 
 public protocol TunnelControlling: Sendable {
     func start(episodeID: ConnectionEpisodeID, configuration: TunnelStartupConfiguration) async -> Result<Void, TunnelStartError>
-    func stop() async
+    func stop(episodeID: ConnectionEpisodeID) async
 }
 
-public struct ConnectionDependencies {
-    public let nativeBootstrap: any ServerBootstrapping
-    public let autoSelector: any AutoSelecting
+public struct ManualConnectionDependencies {
+    public let bootstrapper: any ServerBootstrapping
     public let tunnelController: any TunnelControlling
     public let clock: any Clock
 
     public init(
-        nativeBootstrap: any ServerBootstrapping,
-        autoSelector: any AutoSelecting,
+        bootstrapper: any ServerBootstrapping,
         tunnelController: any TunnelControlling,
         clock: any Clock = SystemClock()
     ) {
-        self.nativeBootstrap = nativeBootstrap
-        self.autoSelector = autoSelector
+        self.bootstrapper = bootstrapper
+        self.tunnelController = tunnelController
+        self.clock = clock
+    }
+}
+
+public struct AutoConnectionDependencies {
+    public let selector: any AutoSelecting
+    public let tunnelController: any TunnelControlling
+    public let clock: any Clock
+
+    public init(
+        selector: any AutoSelecting,
+        tunnelController: any TunnelControlling,
+        clock: any Clock = SystemClock()
+    ) {
+        self.selector = selector
         self.tunnelController = tunnelController
         self.clock = clock
     }

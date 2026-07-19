@@ -32,7 +32,7 @@ public enum DisconnectReason: Sendable {
     case appTermination
 }
 
-public enum TunnelStopReason: Sendable {
+public enum TunnelStopReason: Sendable, Equatable {
     case userInitiated
     case remoteClosed
     case networkLost
@@ -42,7 +42,7 @@ public enum TunnelStopReason: Sendable {
 }
 
 public protocol ConnectionCoordinating: Sendable {
-    func connect() async -> ConnectionStartResult
+    func connect(_ request: ConnectionRequest) async -> ConnectionStartResult
     func disconnect(reason: DisconnectReason) async
     func handle(_ event: ConnectionEvent) async
     func stateSnapshot() async -> ConnectionStateSnapshot
@@ -51,9 +51,15 @@ public protocol ConnectionCoordinating: Sendable {
 public enum ConnectionStateSnapshot: Sendable, Equatable {
     case idle
     case bootstrapping
+    case selecting
     case startingTunnel
     case connected(episodeID: ConnectionEpisodeID)
     case disconnecting
     case disconnected
+    case waitingForNetwork
+    case retrying
+    case selectingReplacement
+    case stabilizing
+    case exhausted
     case failed(reason: String)
 }

@@ -9,7 +9,6 @@ import FptnSharedCore
 import FptnServerSelection
 
 public actor ManualConnectionCoordinator: ConnectionCoordinating {
-    private let server: VPNServer
     private let bootstrapper: any ServerBootstrapping
     private let tunnelController: any TunnelControlling
     private let clock: any Clock
@@ -18,38 +17,33 @@ public actor ManualConnectionCoordinator: ConnectionCoordinating {
     private var generation: UInt64 = 0
 
     public init(
-        server: VPNServer,
         bootstrapper: any ServerBootstrapping,
         tunnelController: any TunnelControlling,
         clock: any Clock = SystemClock()
     ) {
-        self.server = server
         self.bootstrapper = bootstrapper
         self.tunnelController = tunnelController
         self.clock = clock
     }
 
-    public func connect() async -> ConnectionStartResult {
+    public func connect(_ request: ConnectionRequest) async -> ConnectionStartResult {
+        guard case .manual(let manualRequest) = request else {
+            return .failed(.bootstrap("Expected manual connection request"))
+        }
+
         generation &+= 1
         let attempt = generation
 
         state = .bootstrapping
 
         let bootstrapResult = await bootstrapper.bootstrap(
-            server: server,
-            credentials: Credentials(username: "", password: ""),
-            context: BootstrapContext(
-                networkClass: .wifi,
-                sni: "",
-                censorshipStrategy: CensorshipStrategy(storedValue: ""),
-                ipv6Available: false,
-                tokenConfigurationID: ""
-            ),
-            policy: .production
+            server: manualRequest.server,
+            credentials: manualRequest.credentials,
+            context: manualRequest.bootstrapContext,
+            policy: manualRequest.bootstrapPolicy
         )
 
         guard attempt == generation, !Task.isCancelled else {
-            state = .failed(ManualConnectionFailure(reason: "cancelled"))
             return .cancelled
         }
 
@@ -58,12 +52,11 @@ public actor ManualConnectionCoordinator: ConnectionCoordinating {
         case .success(let result):
             bootstrap = result
         case .failure(let failure):
-            state = .failed(ManualConnectionFailure(reason: failure.message))
-            return .failed(.bootstrap(failure.message))
+            state = .failed(ManualConnectionFailure(reason: failure.safeDiagnostic ?? failure.kind.rawValue))
+            return .failed(.bootstrap(failure.safeDiagnostic ?? failure.kind.rawValue))
         }
 
-        guard attempt == generation else {
-            state = .failed(ManualConnectionFailure(reason: "cancelled"))
+        guard attempt == generation, !Task.isCancelled else {
             return .cancelled
         }
 
@@ -77,16 +70,15 @@ public actor ManualConnectionCoordinator: ConnectionCoordinating {
             accessToken: bootstrap.accessToken,
             dnsIPv4: bootstrap.dnsIPv4,
             dnsIPv6: bootstrap.dnsIPv6,
-            sni: "",
+            sni: manualRequest.bootstrapContext.sni,
             md5Fingerprint: bootstrap.server.md5Fingerprint,
-            censorshipStrategy: ""
+            censorshipStrategy: manualRequest.bootstrapContext.censorshipStrategy.rawValue
         )
 
         let tunnelResult = await tunnelController.start(episodeID: episodeID, configuration: config)
 
-        guard attempt == generation else {
-            await tunnelController.stop()
-            state = .failed(ManualConnectionFailure(reason: "cancelled"))
+        guard attempt == generation, !Task.isCancelled else {
+            await tunnelController.stop(episodeID: episodeID)
             return .cancelled
         }
 
@@ -107,7 +99,7 @@ public actor ManualConnectionCoordinator: ConnectionCoordinating {
     public func disconnect(reason: DisconnectReason) async {
         generation &+= 1
         state = .disconnecting
-        await tunnelController.stop()
+        await tunnelController.stop(episodeID: ConnectionEpisodeID())
         state = .disconnected(.userInitiated)
     }
 

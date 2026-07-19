@@ -8,13 +8,13 @@ import Foundation
 import FptnSharedCore
 import FptnServerSelection
 
-
 public actor AutoConnectionCoordinator: ConnectionCoordinating {
     private let selector: any AutoSelecting
     private let tunnelController: any TunnelControlling
     private let clock: any Clock
 
     private var state: AutoConnectionState = .idle
+    private var generation: UInt64 = 0
 
     public init(
         selector: any AutoSelecting,
@@ -26,23 +26,28 @@ public actor AutoConnectionCoordinator: ConnectionCoordinating {
         self.clock = clock
     }
 
-    public func connect() async -> ConnectionStartResult {
+    public func connect(_ request: ConnectionRequest) async -> ConnectionStartResult {
+        guard case .auto(let autoRequest) = request else {
+            return .failed(.bootstrap("Expected auto connection request"))
+        }
+
+        generation &+= 1
+        let attempt = generation
+
         state = .selecting
 
-        let request = SelectionRequest(
-            servers: [],
-            credentials: Credentials(username: "", password: ""),
-            context: BootstrapContext(
-                networkClass: .wifi,
-                sni: "",
-                censorshipStrategy: CensorshipStrategy(storedValue: ""),
-                ipv6Available: false,
-                tokenConfigurationID: ""
-            ),
-            policy: .production
+        let selectionRequest = SelectionRequest(
+            servers: autoRequest.servers,
+            credentials: autoRequest.credentials,
+            context: autoRequest.bootstrapContext,
+            policy: autoRequest.bootstrapPolicy
         )
 
-        let outcome = await selector.select(request)
+        let outcome = await selector.select(selectionRequest)
+
+        guard attempt == generation, !Task.isCancelled else {
+            return .cancelled
+        }
 
         switch outcome.result {
         case .success(let bootstrap):
@@ -56,11 +61,17 @@ public actor AutoConnectionCoordinator: ConnectionCoordinating {
                 accessToken: bootstrap.accessToken,
                 dnsIPv4: bootstrap.dnsIPv4,
                 dnsIPv6: bootstrap.dnsIPv6,
-                sni: "",
+                sni: autoRequest.bootstrapContext.sni,
                 md5Fingerprint: bootstrap.server.md5Fingerprint,
-                censorshipStrategy: ""
+                censorshipStrategy: autoRequest.bootstrapContext.censorshipStrategy.rawValue
             )
             let tunnelResult = await tunnelController.start(episodeID: episodeID, configuration: config)
+
+            guard attempt == generation, !Task.isCancelled else {
+                await tunnelController.stop(episodeID: episodeID)
+                return .cancelled
+            }
+
             switch tunnelResult {
             case .success:
                 state = .connected(episodeID)
@@ -97,7 +108,8 @@ public actor AutoConnectionCoordinator: ConnectionCoordinating {
     }
 
     public func disconnect(reason: DisconnectReason) async {
-        await tunnelController.stop()
+        generation &+= 1
+        await tunnelController.stop(episodeID: ConnectionEpisodeID())
         state = .idle
     }
 
@@ -106,9 +118,15 @@ public actor AutoConnectionCoordinator: ConnectionCoordinating {
         case .tunnelDisconnected(let episodeID, let stopReason):
             guard case .connected(let current) = state, current == episodeID else { return }
             switch stopReason {
+            case .userInitiated:
+                state = .idle
+            case .authenticationFailed:
+                state = .failed(.authenticationRejected)
             case .networkLost:
                 state = .waitingForNetwork
-            default:
+            case .remoteClosed, .transportError:
+                state = .selectingReplacement
+            case .unknown:
                 state = .selectingReplacement
             }
 
@@ -125,11 +143,15 @@ public actor AutoConnectionCoordinator: ConnectionCoordinating {
     public func stateSnapshot() async -> ConnectionStateSnapshot {
         switch state {
         case .idle: return .idle
-        case .selecting, .selectingReplacement, .retryingCurrentServer, .handingOff, .stabilizing: return .bootstrapping
+        case .selecting: return .selecting
         case .startingTunnel: return .startingTunnel
         case .connected(let id): return .connected(episodeID: id)
-        case .waitingForNetwork: return .failed(reason: "waiting for network")
-        case .exhausted: return .failed(reason: "all servers exhausted")
+        case .waitingForNetwork: return .waitingForNetwork
+        case .retryingCurrentServer: return .retrying
+        case .selectingReplacement: return .selectingReplacement
+        case .handingOff: return .stabilizing
+        case .stabilizing: return .stabilizing
+        case .exhausted: return .exhausted
         case .failed(let f): return .failed(reason: "\(f)")
         }
     }

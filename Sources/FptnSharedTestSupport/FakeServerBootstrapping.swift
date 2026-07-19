@@ -5,24 +5,32 @@ Distributed under the MIT License (https://opensource.org/licenses/MIT)
 =============================================================================*/
 
 import Foundation
+#if !CLI_BUILD
 import FptnSharedCore
+#endif
 
-public final class FakeBootstrap: ServerBootstrapping, @unchecked Sendable {
-    public var onBootstrap: ((VPNServer, Credentials) async -> ServerBootstrappingResult)?
+public actor FakeServerBootstrapping: ServerBootstrapping {
+    private var _onBootstrap: ((VPNServer, Credentials) async -> ServerBootstrapAttempt)?
     public private(set) var callCount = 0
     public private(set) var calledServers: [String] = []
 
-    public init() {}
+    public init(onBootstrap: ((VPNServer, Credentials) async -> ServerBootstrapAttempt)? = nil) {
+        self._onBootstrap = onBootstrap
+    }
+
+    public func setOnBootstrap(_ handler: ((VPNServer, Credentials) async -> ServerBootstrapAttempt)?) {
+        self._onBootstrap = handler
+    }
 
     public func bootstrap(
         server: VPNServer,
         credentials: Credentials,
         context: BootstrapContext,
         policy: BootstrapPolicy
-    ) async -> ServerBootstrappingResult {
+    ) async -> ServerBootstrapAttempt {
         callCount += 1
         calledServers.append(server.id)
-        if let handler = onBootstrap {
+        if let handler = _onBootstrap {
             return await handler(server, credentials)
         }
         return .success(ServerBootstrapResult(
