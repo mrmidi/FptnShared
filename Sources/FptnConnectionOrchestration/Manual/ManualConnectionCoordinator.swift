@@ -8,13 +8,14 @@ import Foundation
 import FptnSharedCore
 import FptnServerSelection
 
-public actor ManualConnectionCoordinator: ConnectionCoordinating {
+public actor ManualConnectionCoordinator: ManualConnectionCoordinating {
     private let bootstrapper: any ServerBootstrapping
     private let tunnelController: any TunnelControlling
     private let clock: any Clock
 
     private var state: ManualConnectionState = .idle
     private var generation: UInt64 = 0
+    private var activeEpisodeID: ConnectionEpisodeID?
 
     public init(
         bootstrapper: any ServerBootstrapping,
@@ -26,21 +27,17 @@ public actor ManualConnectionCoordinator: ConnectionCoordinating {
         self.clock = clock
     }
 
-    public func connect(_ request: ConnectionRequest) async -> ConnectionStartResult {
-        guard case .manual(let manualRequest) = request else {
-            return .failed(.bootstrap("Expected manual connection request"))
-        }
-
+    public func connect(_ request: ManualConnectionRequest) async -> ConnectionStartResult {
         generation &+= 1
         let attempt = generation
 
         state = .bootstrapping
 
         let bootstrapResult = await bootstrapper.bootstrap(
-            server: manualRequest.server,
-            credentials: manualRequest.credentials,
-            context: manualRequest.bootstrapContext,
-            policy: manualRequest.bootstrapPolicy
+            server: request.server,
+            credentials: request.credentials,
+            context: request.bootstrapContext,
+            policy: request.bootstrapPolicy
         )
 
         guard attempt == generation, !Task.isCancelled else {
@@ -62,6 +59,7 @@ public actor ManualConnectionCoordinator: ConnectionCoordinating {
 
         state = .startingTunnel
         let episodeID = ConnectionEpisodeID()
+        activeEpisodeID = episodeID
         let config = TunnelStartupConfiguration(
             episodeID: episodeID.rawValue,
             recoveryPolicy: .none,
@@ -70,14 +68,15 @@ public actor ManualConnectionCoordinator: ConnectionCoordinating {
             accessToken: bootstrap.accessToken,
             dnsIPv4: bootstrap.dnsIPv4,
             dnsIPv6: bootstrap.dnsIPv6,
-            sni: manualRequest.bootstrapContext.sni,
+            sni: request.bootstrapContext.sni,
             md5Fingerprint: bootstrap.server.md5Fingerprint,
-            censorshipStrategy: manualRequest.bootstrapContext.censorshipStrategy.rawValue
+            censorshipStrategy: request.bootstrapContext.censorshipStrategy.rawValue
         )
 
         let tunnelResult = await tunnelController.start(episodeID: episodeID, configuration: config)
 
         guard attempt == generation, !Task.isCancelled else {
+            if activeEpisodeID == episodeID { activeEpisodeID = nil }
             await tunnelController.stop(episodeID: episodeID)
             return .cancelled
         }
@@ -91,6 +90,7 @@ public actor ManualConnectionCoordinator: ConnectionCoordinating {
             switch error {
             case .refused(let s): msg = s
             }
+            activeEpisodeID = nil
             state = .failed(ManualConnectionFailure(reason: msg))
             return .failed(.tunnelRefused(msg))
         }
@@ -98,8 +98,12 @@ public actor ManualConnectionCoordinator: ConnectionCoordinating {
 
     public func disconnect(reason: DisconnectReason) async {
         generation &+= 1
+        let episodeID = activeEpisodeID
+        activeEpisodeID = nil
         state = .disconnecting
-        await tunnelController.stop(episodeID: ConnectionEpisodeID())
+        if let episodeID {
+            await tunnelController.stop(episodeID: episodeID)
+        }
         state = .disconnected(.userInitiated)
     }
 
@@ -107,6 +111,7 @@ public actor ManualConnectionCoordinator: ConnectionCoordinating {
         switch event {
         case .tunnelDisconnected(let episodeID, let stopReason):
             guard case .connected(let current) = state, current == episodeID else { return }
+            activeEpisodeID = nil
             let mappedReason: ManualDisconnectReason = {
                 switch stopReason {
                 case .userInitiated: return .userInitiated

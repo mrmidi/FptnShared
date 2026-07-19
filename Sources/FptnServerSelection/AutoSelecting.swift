@@ -28,11 +28,16 @@ public struct SelectionRequest: Sendable {
 
 public struct SelectionOutcome: Sendable {
     public let result: AutoSelectionResult
-    public let attempts: [ServerBootstrapAttempt]
+    public let observations: [ServerHealthObservation]
+
+    public init(result: AutoSelectionResult, observations: [ServerHealthObservation]) {
+        self.result = result
+        self.observations = observations
+    }
 
     public init(result: AutoSelectionResult, attempts: [ServerBootstrapAttempt]) {
         self.result = result
-        self.attempts = attempts
+        self.observations = attempts.map { ServerHealthObservation.from($0) }
     }
 }
 

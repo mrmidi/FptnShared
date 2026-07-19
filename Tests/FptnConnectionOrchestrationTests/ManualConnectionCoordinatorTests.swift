@@ -27,12 +27,12 @@ struct ManualConnectionCoordinatorTests {
         VPNServer(name: name, host: host, port: 443, md5Fingerprint: "fp_\(name)")
     }
 
-    private func makeRequest(server: VPNServer) -> ConnectionRequest {
-        .manual(ManualConnectionRequest(
+    private func makeRequest(server: VPNServer) -> ManualConnectionRequest {
+        ManualConnectionRequest(
             server: server,
             credentials: Credentials(username: "user", password: "pass"),
             bootstrapContext: makeContext()
-        ))
+        )
     }
 
     @Test func connect_performsExactlyOneBootstrapAttempt() async {
@@ -121,7 +121,7 @@ struct ManualConnectionCoordinatorTests {
         #expect(startCallCount == 0)
     }
 
-    @Test func disconnect_stopsTunnelAndEntersDisconnectedState() async {
+    @Test func disconnect_stopsActiveEpisode() async {
         let server = makeServer("Manual-Disc", host: "4.4.4.4")
         let bootstrap = FakeServerBootstrapping()
         let tunnel = FakeTunnelController()
@@ -130,17 +130,59 @@ struct ManualConnectionCoordinatorTests {
             tunnelController: tunnel
         )
 
-        _ = await coordinator.connect(makeRequest(server: server))
+        guard case .started(let episodeID) = await coordinator.connect(makeRequest(server: server)) else {
+            Issue.record("connect failed")
+            return
+        }
+
         await coordinator.disconnect(reason: .userInitiated)
 
         let stopCallCount = await tunnel.stopCallCount
+        let stoppedEpisodes = await tunnel.stoppedEpisodes
         #expect(stopCallCount == 1)
+        #expect(stoppedEpisodes == [episodeID])
         let snapshot = await coordinator.stateSnapshot()
         #expect(snapshot == .disconnected)
     }
 
+    @Test func disconnectDuringSelection_stopsNothing() async {
+        let server = makeServer("Manual-SelDisc", host: "5.5.5.5")
+        let bootstrap = FakeServerBootstrapping()
+        await bootstrap.setOnBootstrap { _, _ in
+            try? await Task.sleep(for: .milliseconds(50))
+            return .success(ServerBootstrapResult(
+                server: server, accessToken: "tok",
+                dnsIPv4: "10.0.0.1", dnsIPv6: nil,
+                metrics: ProbeMetrics(
+                    serverID: server.id, queuePosition: 0,
+                    queuedAtMs: 0, startedAtMs: 0, completedAtMs: 0,
+                    dnsMs: nil, tcpConnectMs: nil, fakeHandshakeMs: nil,
+                    tlsHandshakeMs: nil, loginHTTPMs: nil, bootstrapHTTPMs: nil,
+                    totalMs: 50, cancellationRequestedAtMs: nil, cancellationCompletedAtMs: nil,
+                    outcome: .success
+                )
+            ))
+        }
+        let tunnel = FakeTunnelController()
+        let coordinator = ManualConnectionCoordinator(
+            bootstrapper: bootstrap,
+            tunnelController: tunnel
+        )
+
+        let connectTask = Task { await coordinator.connect(makeRequest(server: server)) }
+        try? await Task.sleep(for: .milliseconds(10))
+        await coordinator.disconnect(reason: .userInitiated)
+
+        _ = await connectTask.value
+
+        let stopCallCount = await tunnel.stopCallCount
+        let stoppedEpisodes = await tunnel.stoppedEpisodes
+        #expect(stopCallCount == 0)
+        #expect(stoppedEpisodes.isEmpty)
+    }
+
     @Test func tunnelFailure_doesNotRetry() async {
-        let server = makeServer("Manual-TunnelFail", host: "5.5.5.5")
+        let server = makeServer("Manual-TunnelFail", host: "6.6.6.6")
         let bootstrap = FakeServerBootstrapping()
         let tunnel = FakeTunnelController()
         await tunnel.setShouldSucceed(false)
@@ -160,7 +202,7 @@ struct ManualConnectionCoordinatorTests {
     }
 
     @Test func disconnectDuringBootstrap_discardsLateCompletion_withoutOverwritingNewerState() async {
-        let server = makeServer("Manual-Cancel", host: "6.6.6.6")
+        let server = makeServer("Manual-Cancel", host: "7.7.7.7")
         let bootstrap = FakeServerBootstrapping()
         await bootstrap.setOnBootstrap { _, _ in
             try? await Task.sleep(for: .milliseconds(50))
@@ -191,7 +233,9 @@ struct ManualConnectionCoordinatorTests {
 
         let startCallCount = await tunnel.startCallCount
         let snapshot = await coordinator.stateSnapshot()
+        let stoppedEpisodes = await tunnel.stoppedEpisodes
         #expect(startCallCount == 0)
+        #expect(stoppedEpisodes.isEmpty)
         if case .cancelled = result {
         } else {
             Issue.record("Expected .cancelled, got \(result)")
@@ -200,7 +244,7 @@ struct ManualConnectionCoordinatorTests {
     }
 
     @Test func unexpectedTunnelDisconnect_doesNotRecover() async {
-        let server = makeServer("Manual-Drop", host: "7.7.7.7")
+        let server = makeServer("Manual-Drop", host: "8.8.8.8")
         let bootstrap = FakeServerBootstrapping()
         let tunnel = FakeTunnelController()
         let coordinator = ManualConnectionCoordinator(
@@ -222,7 +266,7 @@ struct ManualConnectionCoordinatorTests {
     }
 
     @Test func networkRestoration_doesNotReconnect() async {
-        let server = makeServer("Manual-Net", host: "8.8.8.8")
+        let server = makeServer("Manual-Net", host: "9.9.9.9")
         let bootstrap = FakeServerBootstrapping()
         let tunnel = FakeTunnelController()
         let coordinator = ManualConnectionCoordinator(
@@ -245,14 +289,21 @@ struct ManualConnectionCoordinatorTests {
     }
 
     @Test func staleTunnelStart_cannotStopNewerEpisode() async {
-        let server1 = makeServer("Manual-Stale", host: "9.9.9.9")
-        let server2 = makeServer("Manual-New", host: "10.10.10.10")
+        let serverA = makeServer("Manual-Stale", host: "10.10.10.10")
+        let serverB = makeServer("Manual-New", host: "11.11.11.11")
         let bootstrap = FakeServerBootstrapping()
         let tunnel = FakeTunnelController()
 
-        var startDelays: [ConnectionEpisodeID: Task<Void, Never>] = [:]
+        var firstEpisode: ConnectionEpisodeID?
+        var releaseFirst = false
+
         await tunnel.setOnStart { episodeID, _ in
-            try? await Task.sleep(for: .milliseconds(30))
+            if firstEpisode == nil {
+                firstEpisode = episodeID
+                while !releaseFirst {
+                    try? await Task.sleep(for: .milliseconds(5))
+                }
+            }
             return .success(())
         }
 
@@ -261,16 +312,34 @@ struct ManualConnectionCoordinatorTests {
             tunnelController: tunnel
         )
 
-        let firstTask = Task { await coordinator.connect(makeRequest(server: server1)) }
-        try? await Task.sleep(for: .milliseconds(5))
-        await coordinator.disconnect(reason: .userInitiated)
-        _ = await firstTask.value
+        let firstTask = Task { await coordinator.connect(makeRequest(server: serverA)) }
 
-        let secondTask = Task { await coordinator.connect(makeRequest(server: server2)) }
-        try? await Task.sleep(for: .milliseconds(50))
+        while await tunnel.startCallCount < 1 {
+            try? await Task.sleep(for: .milliseconds(5))
+        }
+
+        await coordinator.disconnect(reason: .userInitiated)
+        let secondTask = Task { await coordinator.connect(makeRequest(server: serverB)) }
+        try? await Task.sleep(for: .milliseconds(20))
+        releaseFirst = true
+
+        _ = await firstTask.value
         _ = await secondTask.value
 
+        let stoppedEpisodes = await tunnel.stoppedEpisodes
+        let startCallCount = await tunnel.startCallCount
+        let startedEpisodes = await tunnel.startedEpisodes
+
+        #expect(startCallCount == 2)
+        #expect(startedEpisodes.count == 2)
+
+        guard let episodeB = startedEpisodes.last else {
+            Issue.record("No second episode started")
+            return
+        }
+        #expect(!stoppedEpisodes.contains(episodeB))
+
         let snapshot = await coordinator.stateSnapshot()
-        #expect(snapshot == .connected(episodeID: await tunnel.startedEpisodes.last!))
+        #expect(snapshot == .connected(episodeID: episodeB))
     }
 }

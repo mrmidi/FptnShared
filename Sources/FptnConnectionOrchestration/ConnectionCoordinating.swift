@@ -41,11 +41,18 @@ public enum TunnelStopReason: Sendable, Equatable {
     case unknown(String)
 }
 
-public protocol ConnectionCoordinating: Sendable {
-    func connect(_ request: ConnectionRequest) async -> ConnectionStartResult
+public protocol ConnectionLifecycleCoordinating: Sendable {
     func disconnect(reason: DisconnectReason) async
     func handle(_ event: ConnectionEvent) async
     func stateSnapshot() async -> ConnectionStateSnapshot
+}
+
+public protocol ManualConnectionCoordinating: ConnectionLifecycleCoordinating {
+    func connect(_ request: ManualConnectionRequest) async -> ConnectionStartResult
+}
+
+public protocol AutoConnectionCoordinating: ConnectionLifecycleCoordinating {
+    func connect(_ request: AutoConnectionRequest) async -> ConnectionStartResult
 }
 
 public enum ConnectionStateSnapshot: Sendable, Equatable {
@@ -62,4 +69,9 @@ public enum ConnectionStateSnapshot: Sendable, Equatable {
     case stabilizing
     case exhausted
     case failed(reason: String)
+}
+
+public enum ConnectionPlan: Sendable {
+    case manual(ManualConnectionRequest)
+    case auto(AutoConnectionRequest)
 }

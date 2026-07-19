@@ -27,12 +27,12 @@ struct AutoConnectionCoordinatorTests {
         )
     }
 
-    private func makeRequest(servers: [VPNServer]) -> ConnectionRequest {
-        .auto(AutoConnectionRequest(
+    private func makeRequest(servers: [VPNServer]) -> AutoConnectionRequest {
+        AutoConnectionRequest(
             servers: servers,
             credentials: Credentials(username: "user", password: "pass"),
             bootstrapContext: makeContext()
-        ))
+        )
     }
 
     @Test func connect_successfulSelection_startsTunnelWithAutomaticRecovery() async {
@@ -52,7 +52,7 @@ struct AutoConnectionCoordinatorTests {
                         outcome: .success
                     )
                 )),
-                attempts: []
+                observations: []
             )
         }
         let tunnel = FakeTunnelController()
@@ -82,7 +82,7 @@ struct AutoConnectionCoordinatorTests {
         await selector.setOnSelect { _ in
             SelectionOutcome(result: .allCandidatesFailed(SelectionFailureSummary(
                 attemptedCount: 0, failuresByKind: [:], representativeFailure: nil
-            )), attempts: [])
+            )), observations: [])
         }
         let tunnel = FakeTunnelController()
         let coordinator = AutoConnectionCoordinator(
@@ -117,7 +117,7 @@ struct AutoConnectionCoordinatorTests {
                         outcome: .success
                     )
                 )),
-                attempts: []
+                observations: []
             )
         }
         let tunnel = FakeTunnelController()
@@ -158,7 +158,7 @@ struct AutoConnectionCoordinatorTests {
                         outcome: .success
                     )
                 )),
-                attempts: []
+                observations: []
             )
         }
         let tunnel = FakeTunnelController()
@@ -194,7 +194,7 @@ struct AutoConnectionCoordinatorTests {
                         outcome: .success
                     )
                 )),
-                attempts: []
+                observations: []
             )
         }
         let tunnel = FakeTunnelController()
@@ -230,7 +230,7 @@ struct AutoConnectionCoordinatorTests {
                         outcome: .success
                     )
                 )),
-                attempts: []
+                observations: []
             )
         }
         let tunnel = FakeTunnelController()
@@ -266,7 +266,7 @@ struct AutoConnectionCoordinatorTests {
                         outcome: .success
                     )
                 )),
-                attempts: []
+                observations: []
             )
         }
         let tunnel = FakeTunnelController()
@@ -302,7 +302,7 @@ struct AutoConnectionCoordinatorTests {
                         outcome: .success
                     )
                 )),
-                attempts: []
+                observations: []
             )
         }
         let tunnel = FakeTunnelController()
@@ -321,5 +321,85 @@ struct AutoConnectionCoordinatorTests {
 
         let snapshot = await coordinator.stateSnapshot()
         #expect(snapshot == .idle)
+    }
+
+    @Test func disconnect_stopsActiveEpisode() async {
+        let server = makeServer("Auto-Disc", host: "8.8.8.8")
+        let selector = FakeAutoSelector()
+        await selector.setOnSelect { _ in
+            SelectionOutcome(
+                result: .success(ServerBootstrapResult(
+                    server: server, accessToken: "tok",
+                    dnsIPv4: "10.0.0.1", dnsIPv6: nil,
+                    metrics: ProbeMetrics(
+                        serverID: server.id, queuePosition: 0, queuedAtMs: 0, startedAtMs: 0, completedAtMs: 0,
+                        dnsMs: nil, tcpConnectMs: nil, fakeHandshakeMs: nil,
+                        tlsHandshakeMs: nil, loginHTTPMs: nil, bootstrapHTTPMs: nil,
+                        totalMs: 50, cancellationRequestedAtMs: nil, cancellationCompletedAtMs: nil,
+                        outcome: .success
+                    )
+                )),
+                observations: []
+            )
+        }
+        let tunnel = FakeTunnelController()
+        let coordinator = AutoConnectionCoordinator(
+            selector: selector,
+            tunnelController: tunnel
+        )
+
+        guard case .started(let episodeID) = await coordinator.connect(makeRequest(servers: [server])) else {
+            Issue.record("connect failed")
+            return
+        }
+
+        await coordinator.disconnect(reason: .userInitiated)
+
+        let stopCallCount = await tunnel.stopCallCount
+        let stoppedEpisodes = await tunnel.stoppedEpisodes
+        #expect(stopCallCount == 1)
+        #expect(stoppedEpisodes == [episodeID])
+        let snapshot = await coordinator.stateSnapshot()
+        #expect(snapshot == .idle)
+    }
+
+    @Test func disconnectDuringSelection_stopsNothing() async {
+        let server = makeServer("Auto-SelDisc", host: "9.9.9.9")
+        let selector = FakeAutoSelector()
+        await selector.setOnSelect { _ in
+            try? await Task.sleep(for: .milliseconds(50))
+            return SelectionOutcome(
+                result: .success(ServerBootstrapResult(
+                    server: server, accessToken: "tok",
+                    dnsIPv4: "10.0.0.1", dnsIPv6: nil,
+                    metrics: ProbeMetrics(
+                        serverID: server.id, queuePosition: 0, queuedAtMs: 0, startedAtMs: 0, completedAtMs: 0,
+                        dnsMs: nil, tcpConnectMs: nil, fakeHandshakeMs: nil,
+                        tlsHandshakeMs: nil, loginHTTPMs: nil, bootstrapHTTPMs: nil,
+                        totalMs: 50, cancellationRequestedAtMs: nil, cancellationCompletedAtMs: nil,
+                        outcome: .success
+                    )
+                )),
+                observations: []
+            )
+        }
+        let tunnel = FakeTunnelController()
+        let coordinator = AutoConnectionCoordinator(
+            selector: selector,
+            tunnelController: tunnel
+        )
+
+        let connectTask: Task<ConnectionStartResult, Never> = Task {
+            await coordinator.connect(makeRequest(servers: [server]))
+        }
+        try? await Task.sleep(for: .milliseconds(10))
+        await coordinator.disconnect(reason: .userInitiated)
+
+        _ = await connectTask.value
+
+        let stopCallCount = await tunnel.stopCallCount
+        let stoppedEpisodes = await tunnel.stoppedEpisodes
+        #expect(stopCallCount == 0)
+        #expect(stoppedEpisodes.isEmpty)
     }
 }

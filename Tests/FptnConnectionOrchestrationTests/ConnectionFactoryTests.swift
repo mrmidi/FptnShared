@@ -13,14 +13,39 @@ import FptnSharedTestSupport
 
 struct ConnectionFactoryTests {
 
+    private func makeContext() -> BootstrapContext {
+        BootstrapContext(
+            networkClass: .wifi,
+            sni: "sni",
+            censorshipStrategy: CensorshipStrategy(storedValue: ""),
+            ipv6Available: false,
+            tokenConfigurationID: "cfg"
+        )
+    }
+
+    private func makeManualRequest(server: VPNServer) -> ManualConnectionRequest {
+        ManualConnectionRequest(
+            server: server,
+            credentials: Credentials(username: "u", password: "p"),
+            bootstrapContext: makeContext()
+        )
+    }
+
+    private func makeAutoRequest(servers: [VPNServer]) -> AutoConnectionRequest {
+        AutoConnectionRequest(
+            servers: servers,
+            credentials: Credentials(username: "u", password: "p"),
+            bootstrapContext: makeContext()
+        )
+    }
+
     @Test func makeManualCoordinator_returnsManualCoordinator() {
         let deps = ManualConnectionDependencies(
             bootstrapper: FakeServerBootstrapping(),
             tunnelController: FakeTunnelController()
         )
         let coordinator = makeManualCoordinator(deps: deps)
-
-        #expect(coordinator is ManualConnectionCoordinator)
+        #expect(coordinator is ManualConnectionCoordinating)
     }
 
     @Test func makeAutoCoordinator_returnsAutoCoordinator() {
@@ -29,8 +54,25 @@ struct ConnectionFactoryTests {
             tunnelController: FakeTunnelController()
         )
         let coordinator = makeAutoCoordinator(deps: deps)
+        #expect(coordinator is AutoConnectionCoordinating)
+    }
 
-        #expect(coordinator is AutoConnectionCoordinator)
+    @Test func makeCoordinator_manualPlan_returnsManualCoordinator() {
+        let manualDeps = ManualConnectionDependencies(
+            bootstrapper: FakeServerBootstrapping(),
+            tunnelController: FakeTunnelController()
+        )
+        let autoDeps = AutoConnectionDependencies(
+            selector: FakeAutoSelector(),
+            tunnelController: FakeTunnelController()
+        )
+        let server = VPNServer(name: "S", host: "1.1.1.1", port: 443, md5Fingerprint: "a")
+        let coordinator = makeCoordinator(
+            for: .manual(makeManualRequest(server: server)),
+            manualDeps: manualDeps,
+            autoDeps: autoDeps
+        )
+        #expect(coordinator is ManualConnectionCoordinating)
     }
 
     @Test func manualCoordinator_bootstrapFailure_startsExactlyOnce() async {
@@ -57,16 +99,7 @@ struct ConnectionFactoryTests {
         )
         let coordinator = makeManualCoordinator(deps: deps)
 
-        let request = ConnectionRequest.manual(ManualConnectionRequest(
-            server: server,
-            credentials: Credentials(username: "u", password: "p"),
-            bootstrapContext: BootstrapContext(
-                networkClass: .wifi, sni: "sni",
-                censorshipStrategy: CensorshipStrategy(storedValue: ""),
-                ipv6Available: false, tokenConfigurationID: "cfg"
-            )
-        ))
-        let result = await coordinator.connect(request)
+        let result = await coordinator.connect(makeManualRequest(server: server))
 
         if case .failed(.bootstrap) = result {
         } else {
@@ -101,18 +134,8 @@ struct ConnectionFactoryTests {
         )
         let coordinator = makeManualCoordinator(deps: deps)
 
-        let request = ConnectionRequest.manual(ManualConnectionRequest(
-            server: server,
-            credentials: Credentials(username: "u", password: "p"),
-            bootstrapContext: BootstrapContext(
-                networkClass: .wifi, sni: "sni",
-                censorshipStrategy: CensorshipStrategy(storedValue: ""),
-                ipv6Available: false, tokenConfigurationID: "cfg"
-            )
-        ))
-
         let connectTask: Task<ConnectionStartResult, Never> = Task {
-            await coordinator.connect(request)
+            await coordinator.connect(makeManualRequest(server: server))
         }
         try? await Task.sleep(for: .milliseconds(10))
         await coordinator.disconnect(reason: .userInitiated)
@@ -144,26 +167,17 @@ struct ConnectionFactoryTests {
         )
         let coordinator = makeManualCoordinator(deps: deps)
 
-        let request = ConnectionRequest.manual(ManualConnectionRequest(
-            server: server,
-            credentials: Credentials(username: "u", password: "p"),
-            bootstrapContext: BootstrapContext(
-                networkClass: .wifi, sni: "sni",
-                censorshipStrategy: CensorshipStrategy(storedValue: ""),
-                ipv6Available: false, tokenConfigurationID: "cfg"
-            )
-        ))
-        _ = await coordinator.connect(request)
+        _ = await coordinator.connect(makeManualRequest(server: server))
 
         #expect(capturedPolicy == TunnelRecoveryPolicy.none)
     }
 
-    @Test func manualCoordinator_canBeConstructedWithoutAutoComponents() {
-        let deps = ManualConnectionDependencies(
-            bootstrapper: FakeServerBootstrapping(),
+    @Test func modeBoundary_manualRequestCannotReachAutoCoordinatorAtCompileTime() {
+        let autoDeps = AutoConnectionDependencies(
+            selector: FakeAutoSelector(),
             tunnelController: FakeTunnelController()
         )
-        let coordinator = makeManualCoordinator(deps: deps)
-        #expect(coordinator is ManualConnectionCoordinator)
+        let autoCoordinator = makeAutoCoordinator(deps: autoDeps)
+        #expect(autoCoordinator is AutoConnectionCoordinating)
     }
 }

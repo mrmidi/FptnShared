@@ -12,6 +12,7 @@ public enum AutoConnectionState: Sendable, Equatable {
     case selecting
     case startingTunnel
     case connected(ConnectionEpisodeID)
+    case disconnecting
     case waitingForNetwork
     case retryingCurrentServer
     case selectingReplacement

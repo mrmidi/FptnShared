@@ -10,7 +10,7 @@ import FptnServerSelection
 
 public func makeManualCoordinator(
     deps: ManualConnectionDependencies
-) -> any ConnectionCoordinating {
+) -> any ManualConnectionCoordinating {
     ManualConnectionCoordinator(
         bootstrapper: deps.bootstrapper,
         tunnelController: deps.tunnelController,
@@ -20,7 +20,7 @@ public func makeManualCoordinator(
 
 public func makeAutoCoordinator(
     deps: AutoConnectionDependencies
-) -> any ConnectionCoordinating {
+) -> any AutoConnectionCoordinating {
     AutoConnectionCoordinator(
         selector: deps.selector,
         tunnelController: deps.tunnelController,
@@ -29,11 +29,11 @@ public func makeAutoCoordinator(
 }
 
 public func makeCoordinator(
-    for intent: ConnectionIntent,
+    for plan: ConnectionPlan,
     manualDeps: ManualConnectionDependencies,
     autoDeps: AutoConnectionDependencies
-) -> any ConnectionCoordinating {
-    switch intent {
+) -> any ConnectionLifecycleCoordinating {
+    switch plan {
     case .manual:
         makeManualCoordinator(deps: manualDeps)
     case .auto:

@@ -8,13 +8,14 @@ import Foundation
 import FptnSharedCore
 import FptnServerSelection
 
-public actor AutoConnectionCoordinator: ConnectionCoordinating {
+public actor AutoConnectionCoordinator: AutoConnectionCoordinating {
     private let selector: any AutoSelecting
     private let tunnelController: any TunnelControlling
     private let clock: any Clock
 
     private var state: AutoConnectionState = .idle
     private var generation: UInt64 = 0
+    private var activeEpisodeID: ConnectionEpisodeID?
 
     public init(
         selector: any AutoSelecting,
@@ -26,21 +27,17 @@ public actor AutoConnectionCoordinator: ConnectionCoordinating {
         self.clock = clock
     }
 
-    public func connect(_ request: ConnectionRequest) async -> ConnectionStartResult {
-        guard case .auto(let autoRequest) = request else {
-            return .failed(.bootstrap("Expected auto connection request"))
-        }
-
+    public func connect(_ request: AutoConnectionRequest) async -> ConnectionStartResult {
         generation &+= 1
         let attempt = generation
 
         state = .selecting
 
         let selectionRequest = SelectionRequest(
-            servers: autoRequest.servers,
-            credentials: autoRequest.credentials,
-            context: autoRequest.bootstrapContext,
-            policy: autoRequest.bootstrapPolicy
+            servers: request.servers,
+            credentials: request.credentials,
+            context: request.bootstrapContext,
+            policy: request.bootstrapPolicy
         )
 
         let outcome = await selector.select(selectionRequest)
@@ -53,6 +50,7 @@ public actor AutoConnectionCoordinator: ConnectionCoordinating {
         case .success(let bootstrap):
             state = .startingTunnel
             let episodeID = ConnectionEpisodeID()
+            activeEpisodeID = episodeID
             let config = TunnelStartupConfiguration(
                 episodeID: episodeID.rawValue,
                 recoveryPolicy: .automatic(AutoTunnelRecoveryPolicy(sameServerAttempts: 2, reconnectDelaySeconds: 2)),
@@ -61,13 +59,14 @@ public actor AutoConnectionCoordinator: ConnectionCoordinating {
                 accessToken: bootstrap.accessToken,
                 dnsIPv4: bootstrap.dnsIPv4,
                 dnsIPv6: bootstrap.dnsIPv6,
-                sni: autoRequest.bootstrapContext.sni,
+                sni: request.bootstrapContext.sni,
                 md5Fingerprint: bootstrap.server.md5Fingerprint,
-                censorshipStrategy: autoRequest.bootstrapContext.censorshipStrategy.rawValue
+                censorshipStrategy: request.bootstrapContext.censorshipStrategy.rawValue
             )
             let tunnelResult = await tunnelController.start(episodeID: episodeID, configuration: config)
 
             guard attempt == generation, !Task.isCancelled else {
+                if activeEpisodeID == episodeID { activeEpisodeID = nil }
                 await tunnelController.stop(episodeID: episodeID)
                 return .cancelled
             }
@@ -81,6 +80,7 @@ public actor AutoConnectionCoordinator: ConnectionCoordinating {
                 switch error {
                 case .refused(let s): msg = s
                 }
+                activeEpisodeID = nil
                 state = .failed(.internalError(msg))
                 return .failed(.tunnelRefused(msg))
             }
@@ -109,7 +109,12 @@ public actor AutoConnectionCoordinator: ConnectionCoordinating {
 
     public func disconnect(reason: DisconnectReason) async {
         generation &+= 1
-        await tunnelController.stop(episodeID: ConnectionEpisodeID())
+        let episodeID = activeEpisodeID
+        activeEpisodeID = nil
+        state = .disconnecting
+        if let episodeID {
+            await tunnelController.stop(episodeID: episodeID)
+        }
         state = .idle
     }
 
@@ -117,6 +122,7 @@ public actor AutoConnectionCoordinator: ConnectionCoordinating {
         switch event {
         case .tunnelDisconnected(let episodeID, let stopReason):
             guard case .connected(let current) = state, current == episodeID else { return }
+            activeEpisodeID = nil
             switch stopReason {
             case .userInitiated:
                 state = .idle
@@ -146,6 +152,7 @@ public actor AutoConnectionCoordinator: ConnectionCoordinating {
         case .selecting: return .selecting
         case .startingTunnel: return .startingTunnel
         case .connected(let id): return .connected(episodeID: id)
+        case .disconnecting: return .disconnecting
         case .waitingForNetwork: return .waitingForNetwork
         case .retryingCurrentServer: return .retrying
         case .selectingReplacement: return .selectingReplacement
