@@ -25,15 +25,25 @@ public enum TunnelControlAction: String, Codable, Sendable, Equatable {
     case setLogLevel = "set_log_level"
     case ping
     case getStatus = "get_status"
+    case prepareStop = "prepare_stop"
+}
+
+// PR4a: identifies who initiated a tunnel stop.
+public enum TunnelStopInitiator: String, Codable, Sendable, Equatable {
+    case appDisconnect = "app_disconnect"
+    case providerFailure = "provider_failure"
+    case systemStop = "system_stop"
 }
 
 public struct TunnelControlMessage: Codable, Sendable, Equatable {
     public let action: TunnelControlAction
     public let logLevel: SharedLogLevel?
+    public let initiator: TunnelStopInitiator?
 
-    public init(action: TunnelControlAction, logLevel: SharedLogLevel? = nil) {
+    public init(action: TunnelControlAction, logLevel: SharedLogLevel? = nil, initiator: TunnelStopInitiator? = nil) {
         self.action = action
         self.logLevel = logLevel
+        self.initiator = initiator
     }
 }
 
