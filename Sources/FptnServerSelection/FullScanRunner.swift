@@ -23,13 +23,15 @@ public struct ScanStatistics: Sendable, Codable {
     public let completedCount: Int
     public let neverStartedCount: Int
     public let peakActiveProbes: Int
+    public let totalScanDurationMs: Int?
 
-    public init(candidateCount: Int, startedCount: Int, completedCount: Int, neverStartedCount: Int, peakActiveProbes: Int) {
+    public init(candidateCount: Int, startedCount: Int, completedCount: Int, neverStartedCount: Int, peakActiveProbes: Int, totalScanDurationMs: Int? = nil) {
         self.candidateCount = candidateCount
         self.startedCount = startedCount
         self.completedCount = completedCount
         self.neverStartedCount = neverStartedCount
         self.peakActiveProbes = peakActiveProbes
+        self.totalScanDurationMs = totalScanDurationMs
     }
 }
 
@@ -67,6 +69,7 @@ public actor FullScanRunner {
         var activeCount = 0
 
         let runID = UUID()
+        let scanStartInstant = clock.now()
 
         await withTaskGroup(of: RaceAttemptRecord.self) { group in
             let initialCount = min(maxActive, ordered.count)
@@ -122,6 +125,10 @@ public actor FullScanRunner {
             }
         }
 
+        let scanEndInstant = clock.now()
+        let duration = scanStartInstant.duration(to: scanEndInstant)
+        let durationMs = Int(duration.components.seconds * 1000 + duration.components.attoseconds / 1_000_000_000_000_000)
+
         let observations = records.map { ServerHealthObservation.from($0.result) }
         let updates = healthPolicy.updates(from: observations)
         if !updates.isEmpty {
@@ -135,7 +142,8 @@ public actor FullScanRunner {
                 startedCount: index,
                 completedCount: records.count,
                 neverStartedCount: ordered.count - index,
-                peakActiveProbes: peakActive
+                peakActiveProbes: peakActive,
+                totalScanDurationMs: durationMs
             )
         )
     }
