@@ -9,6 +9,7 @@ let package = Package(
         .tvOS(.v17)
     ],
     products: [
+        .library(name: "FptnShared", targets: ["FptnSharedCore", "FptnSharedTunnel", "FptnServerSelection", "FptnConnectionOrchestration"]),
         .library(name: "FptnSharedCore", targets: ["FptnSharedCore"]),
         .library(name: "FptnSharedTunnel", targets: ["FptnSharedTunnel"]),
         .library(name: "FptnSharedTestSupport", targets: ["FptnSharedTestSupport"]),

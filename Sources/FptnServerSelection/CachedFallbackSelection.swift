@@ -54,7 +54,6 @@ public actor CachedFallbackSelection {
         }
 
         // Apply remaining budget as stage and candidate deadline
-        var fallbackPolicy = bootstrapPolicy
         let cappedTimeout = min(bootstrapPolicy.candidateDeadline, budget)
 
         let runID = UUID()
