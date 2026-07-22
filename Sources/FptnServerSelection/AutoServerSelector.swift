@@ -77,7 +77,7 @@ public actor AutoServerSelector: AutoSelecting {
         let observations = execution.attempts.map { ServerHealthObservation.from($0.result) }
         let result = aggregateOutcome(execution, observations: observations, policy: activePolicy)
 
-        let updates = healthPolicy.updates(from: observations)
+        let updates = healthPolicy.updates(from: observations, context: request.context)
         if !updates.isEmpty {
             try? await healthStore.apply(updates)
         }

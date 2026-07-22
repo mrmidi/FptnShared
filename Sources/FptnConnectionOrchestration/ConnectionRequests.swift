@@ -25,19 +25,22 @@ public struct ManualConnectionRequest: Sendable {
     public let bootstrapContext: BootstrapContext
     public let bootstrapPolicy: BootstrapPolicy
     public let tunnelRecoveryPolicy: TunnelRecoveryPolicy
+    public let tunnelRuntimeOptions: TunnelRuntimeOptions
 
     public init(
         server: VPNServer,
         credentials: Credentials,
         bootstrapContext: BootstrapContext,
         bootstrapPolicy: BootstrapPolicy = .production,
-        tunnelRecoveryPolicy: TunnelRecoveryPolicy = .none
+        tunnelRecoveryPolicy: TunnelRecoveryPolicy = .none,
+        tunnelRuntimeOptions: TunnelRuntimeOptions = TunnelRuntimeOptions()
     ) {
         self.server = server
         self.credentials = credentials
         self.bootstrapContext = bootstrapContext
         self.bootstrapPolicy = bootstrapPolicy
         self.tunnelRecoveryPolicy = tunnelRecoveryPolicy
+        self.tunnelRuntimeOptions = tunnelRuntimeOptions
     }
 }
 
@@ -49,6 +52,7 @@ public struct AutoConnectionRequest: Sendable {
     public let selectionPolicy: SelectionPolicy
     public let tunnelRecoveryPolicy: TunnelRecoveryPolicy
     public let reselectionPolicy: AutoReselectionPolicy
+    public let tunnelRuntimeOptions: TunnelRuntimeOptions
 
     public init(
         servers: [VPNServer],
@@ -57,7 +61,8 @@ public struct AutoConnectionRequest: Sendable {
         bootstrapPolicy: BootstrapPolicy = .production,
         selectionPolicy: SelectionPolicy = .production,
         tunnelRecoveryPolicy: TunnelRecoveryPolicy = .automatic(AutoTunnelRecoveryPolicy(sameServerAttempts: 2, reconnectDelaySeconds: 2)),
-        reselectionPolicy: AutoReselectionPolicy = AutoReselectionPolicy()
+        reselectionPolicy: AutoReselectionPolicy = AutoReselectionPolicy(),
+        tunnelRuntimeOptions: TunnelRuntimeOptions = TunnelRuntimeOptions()
     ) {
         self.servers = servers
         self.credentials = credentials
@@ -66,6 +71,7 @@ public struct AutoConnectionRequest: Sendable {
         self.selectionPolicy = selectionPolicy
         self.tunnelRecoveryPolicy = tunnelRecoveryPolicy
         self.reselectionPolicy = reselectionPolicy
+        self.tunnelRuntimeOptions = tunnelRuntimeOptions
     }
 }
 

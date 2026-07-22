@@ -130,7 +130,7 @@ public actor FullScanRunner {
         let durationMs = Int(duration.components.seconds * 1000 + duration.components.attoseconds / 1_000_000_000_000_000)
 
         let observations = records.map { ServerHealthObservation.from($0.result) }
-        let updates = healthPolicy.updates(from: observations)
+        let updates = healthPolicy.updates(from: observations, context: context)
         if !updates.isEmpty {
             try? await healthStore.apply(updates)
         }

@@ -19,6 +19,7 @@ public actor AutoConnectionCoordinator: AutoConnectionCoordinating {
     private var activeEpisodeID: ConnectionEpisodeID?
     private var lastRequest: AutoConnectionRequest?
     private var remainingReplacementAttempts: Int = 0
+    private var replacementTask: Task<Void, Never>?
 
     public init(
         selector: any AutoSelecting,
@@ -71,8 +72,13 @@ public actor AutoConnectionCoordinator: AutoConnectionCoordinating {
                     dnsIPv4: bootstrap.dnsIPv4,
                     dnsIPv6: bootstrap.dnsIPv6,
                     sni: request.bootstrapContext.sni,
-                    md5Fingerprint: bootstrap.server.md5Fingerprint,
-                    censorshipStrategy: request.bootstrapContext.censorshipStrategy
+                md5Fingerprint: bootstrap.server.md5Fingerprint,
+                    censorshipStrategy: request.bootstrapContext.censorshipStrategy,
+                    logLevel: request.tunnelRuntimeOptions.logLevel,
+                    websocketIdleTimeoutSeconds: request.tunnelRuntimeOptions.websocketIdleTimeoutSeconds,
+                    customDnsIPv4: request.tunnelRuntimeOptions.customDnsIPv4,
+                    perAppMode: request.tunnelRuntimeOptions.perAppMode,
+                    allowedBundleIDs: request.tunnelRuntimeOptions.allowedBundleIDs
                 )
             } catch {
                 state = .failed(.internalError("Invalid startup configuration"))
@@ -125,6 +131,8 @@ public actor AutoConnectionCoordinator: AutoConnectionCoordinating {
 
     public func disconnect(reason: DisconnectReason) async {
         generation &+= 1
+        replacementTask?.cancel()
+        replacementTask = nil
         let episodeID = activeEpisodeID
         activeEpisodeID = nil
         lastRequest = nil
@@ -154,12 +162,12 @@ public actor AutoConnectionCoordinator: AutoConnectionCoordinating {
                 state = .waitingForNetwork
 
             case .remoteClosed, .transportError, .unknown:
-                triggerReplacementSelection()
+                await triggerReplacementSelection(consumesBudget: true)
             }
 
         case .networkBecameSatisfied:
             if case .waitingForNetwork = state {
-                triggerReplacementSelection()
+                await triggerReplacementSelection(consumesBudget: false)
             }
 
         case .networkBecameUnsatisfied:
@@ -173,16 +181,28 @@ public actor AutoConnectionCoordinator: AutoConnectionCoordinating {
         }
     }
 
-    private func triggerReplacementSelection() {
-        guard let request = lastRequest, remainingReplacementAttempts > 0 else {
+    private func triggerReplacementSelection(consumesBudget: Bool) async {
+        guard let request = lastRequest else {
             state = .exhausted
             return
         }
-        remainingReplacementAttempts -= 1
+        if consumesBudget {
+            guard remainingReplacementAttempts > 0 else {
+                state = .exhausted
+                return
+            }
+            remainingReplacementAttempts -= 1
+        }
+        replacementTask?.cancel()
         state = .selectingReplacement
         let currentAttempt = generation
-        Task { [weak self] in
+        replacementTask = Task { [weak self, clock] in
             guard let self else { return }
+            do {
+                try await clock.sleep(for: .seconds(request.reselectionPolicy.delaySeconds))
+            } catch {
+                return
+            }
             _ = await self.executeSelectionAndConnect(request, attempt: currentAttempt)
         }
     }

@@ -146,3 +146,25 @@ public struct TunnelStartupConfigurationV1: Codable, Sendable, Equatable {
 }
 
 public typealias TunnelStartupConfiguration = TunnelStartupConfigurationV1
+
+public struct TunnelRuntimeOptions: Sendable, Equatable {
+    public let logLevel: SharedLogLevel
+    public let websocketIdleTimeoutSeconds: Int
+    public let customDnsIPv4: String?
+    public let perAppMode: PerAppTunnelMode
+    public let allowedBundleIDs: [String]
+
+    public init(
+        logLevel: SharedLogLevel = .warning,
+        websocketIdleTimeoutSeconds: Int = 30,
+        customDnsIPv4: String? = nil,
+        perAppMode: PerAppTunnelMode = .disabled,
+        allowedBundleIDs: [String] = []
+    ) {
+        self.logLevel = logLevel
+        self.websocketIdleTimeoutSeconds = websocketIdleTimeoutSeconds
+        self.customDnsIPv4 = customDnsIPv4
+        self.perAppMode = perAppMode
+        self.allowedBundleIDs = allowedBundleIDs
+    }
+}

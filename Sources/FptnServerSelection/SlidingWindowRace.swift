@@ -22,7 +22,6 @@ public struct SlidingWindowRace: Sendable {
         bootstrapper: any ServerBootstrapping
     ) async -> RaceExecution {
         let maxActive = max(1, selectionPolicy.maximumActiveProbes)
-        _ = bootstrapPolicy.candidateDeadline  // enforced per-candidate by native timeout
         _ = selectionPolicy.selectionDeadline // enforced by soft-deadline timer
         let runID = UUID()
         let clockNow = clock.now()
@@ -76,7 +75,7 @@ public struct SlidingWindowRace: Sendable {
                         do {
                             try await Task.sleep(for: selectionPolicy.selectionDeadline)
                         } catch {
-                            // Cancelled, do nothing
+                            return RaceAttemptRecord.cancelledTimer(at: clock.now())
                         }
                         let now = clock.now()
                         return RaceAttemptRecord(
@@ -105,12 +104,14 @@ public struct SlidingWindowRace: Sendable {
                             group.cancelAll()
                             break
                         }
+                        if record.serverID == "cancelled_timer_sentinel" {
+                            continue
+                        }
 
                         activeCount -= 1
                         records.append(record)
 
                         if Task.isCancelled {
-                            deadlineTriggered = true
                             if !group.isEmpty {
                                 group.cancelAll()
                             }
@@ -209,6 +210,22 @@ public struct SlidingWindowRace: Sendable {
         )
 
         return result
+    }
+}
+
+private extension RaceAttemptRecord {
+    static func cancelledTimer(at instant: ContinuousClock.Instant) -> RaceAttemptRecord {
+        RaceAttemptRecord(
+            serverID: "cancelled_timer_sentinel",
+            queuePosition: -1,
+            result: .failure(ServerProbeFailure(
+                server: VPNServer(name: "timer", host: "0.0.0.0", port: 1, md5Fingerprint: "timer"),
+                kind: .cancelled,
+                metrics: ProbeMetrics(serverID: "", queuePosition: -1, queuedAtMs: 0, startedAtMs: 0, completedAtMs: 0, dnsMs: nil, tcpConnectMs: nil, fakeHandshakeMs: nil, tlsHandshakeMs: nil, loginHTTPMs: nil, bootstrapHTTPMs: nil, totalMs: 0, cancellationRequestedAtMs: nil, cancellationCompletedAtMs: nil, outcome: .cancelled)
+            )),
+            startedAt: instant,
+            completedAt: instant
+        )
     }
 }
 

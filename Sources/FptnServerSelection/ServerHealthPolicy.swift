@@ -24,18 +24,21 @@ public struct ServerHealthPolicy: Sendable {
 
     public static let production = ServerHealthPolicy()
 
-    public func updates(from observations: [ServerHealthObservation]) -> [ServerHealthUpdate] {
+    public func updates(
+        from observations: [ServerHealthObservation],
+        context: BootstrapContext
+    ) -> [ServerHealthUpdate] {
         observations.compactMap { obs in
             guard obs.outcome != .cancelled && obs.outcome != .authenticationRejected else {
                 return nil
             }
             let key = ServerHealthKey(
                 serverID: obs.serverID,
-                networkClass: .wifi,
-                sni: "",
-                censorshipStrategy: CensorshipStrategy(storedValue: ""),
-                ipv6Available: false,
-                tokenConfigurationID: ""
+                networkClass: context.networkClass,
+                sni: context.sni,
+                censorshipStrategy: context.censorshipStrategy,
+                ipv6Available: context.ipv6Available,
+                tokenConfigurationID: context.tokenConfigurationID
             )
             return ServerHealthUpdate(key: key, observation: obs)
         }

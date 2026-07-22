@@ -75,7 +75,12 @@ public actor ManualConnectionCoordinator: ManualConnectionCoordinating {
                 dnsIPv6: bootstrap.dnsIPv6,
                 sni: request.bootstrapContext.sni,
                 md5Fingerprint: bootstrap.server.md5Fingerprint,
-                censorshipStrategy: request.bootstrapContext.censorshipStrategy
+                censorshipStrategy: request.bootstrapContext.censorshipStrategy,
+                logLevel: request.tunnelRuntimeOptions.logLevel,
+                websocketIdleTimeoutSeconds: request.tunnelRuntimeOptions.websocketIdleTimeoutSeconds,
+                customDnsIPv4: request.tunnelRuntimeOptions.customDnsIPv4,
+                perAppMode: request.tunnelRuntimeOptions.perAppMode,
+                allowedBundleIDs: request.tunnelRuntimeOptions.allowedBundleIDs
             )
         } catch {
             state = .failed(ManualConnectionFailure(reason: "Failed to create startup configuration: \(error)"))
