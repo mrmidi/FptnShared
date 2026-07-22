@@ -71,9 +71,41 @@ public struct SlidingWindowRace: Sendable {
                         }
                         index += 1
                     }
+                    // Overall selection deadline timer task
+                    group.addTask {
+                        do {
+                            try await Task.sleep(for: selectionPolicy.selectionDeadline)
+                        } catch {
+                            // Cancelled, do nothing
+                        }
+                        let now = clock.now()
+                        return RaceAttemptRecord(
+                            serverID: "deadline_timer_sentinel",
+                            queuePosition: -1,
+                            result: .failure(ServerProbeFailure(
+                                server: candidates[0],
+                                kind: .cancelled,
+                                metrics: ProbeMetrics(
+                                    serverID: "", queuePosition: -1, queuedAtMs: 0, startedAtMs: 0, completedAtMs: 0,
+                                    dnsMs: nil, tcpConnectMs: nil, fakeHandshakeMs: nil, tlsHandshakeMs: nil, loginHTTPMs: nil, bootstrapHTTPMs: nil,
+                                    totalMs: 0, cancellationRequestedAtMs: nil, cancellationCompletedAtMs: nil, outcome: .cancelled
+                                )
+                            )),
+                            startedAt: now,
+                            completedAt: now
+                        )
+                    }
+
                     peakActive = activeCount
 
                     for await record in group {
+                        if record.serverID == "deadline_timer_sentinel" {
+                            if winner != nil { continue }
+                            deadlineTriggered = true
+                            group.cancelAll()
+                            break
+                        }
+
                         activeCount -= 1
                         records.append(record)
 
@@ -134,6 +166,10 @@ public struct SlidingWindowRace: Sendable {
                         }
 
                         if winner != nil { break }
+                        if activeCount == 0 && index >= candidates.count {
+                            group.cancelAll()
+                            break
+                        }
                     }
 
                     let neverStarted = candidates.count - index
@@ -148,7 +184,8 @@ public struct SlidingWindowRace: Sendable {
 
                     let termination: RaceTermination = {
                         if winner != nil { return .winner }
-                        if Task.isCancelled { return deadlineTriggered ? .selectionDeadline : .callerCancelled }
+                        if deadlineTriggered { return .selectionDeadline }
+                        if Task.isCancelled { return .callerCancelled }
                         return .allCompleted
                     }()
 
