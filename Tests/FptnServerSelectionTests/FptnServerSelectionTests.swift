@@ -258,4 +258,31 @@ struct FptnServerSelectionTests {
 
         #expect(ordered.first?.id == servers[1].id)
     }
+
+    @Test func healthUpdatesPreserveBootstrapContext() throws {
+        let context = BootstrapContext(
+            networkClass: .cellular,
+            sni: "context.example.com",
+            censorshipStrategy: CensorshipStrategy(storedValue: "reality"),
+            ipv6Available: true,
+            tokenConfigurationID: "stable-config"
+        )
+        let observation = ServerHealthObservation(
+            serverID: "server-id",
+            outcome: .success,
+            totalBootstrapMs: 42,
+            checkedAt: Date()
+        )
+
+        let update = try #require(ServerHealthPolicy.production.updates(
+            from: [observation],
+            context: context
+        ).first)
+
+        #expect(update.key.networkClass == context.networkClass)
+        #expect(update.key.sni == context.sni)
+        #expect(update.key.censorshipStrategy == context.censorshipStrategy)
+        #expect(update.key.ipv6Available == context.ipv6Available)
+        #expect(update.key.tokenConfigurationID == context.tokenConfigurationID)
+    }
 }
