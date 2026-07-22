@@ -23,4 +23,14 @@ final class FptnSharedCoreTests: XCTestCase {
         XCTAssertEqual(decoded, message)
     }
 
+    func testTunnelTrafficSnapshotRoundTrip() throws {
+        let snapshot = TunnelTrafficSnapshotV1(
+            outboundPacketBytes: 12_345,
+            inboundPacketBytes: 67_890
+        )
+        let data = try JSONEncoder().encode(snapshot)
+        let decoded = try JSONDecoder().decode(TunnelTrafficSnapshotV1.self, from: data)
+        XCTAssertEqual(decoded, snapshot)
+    }
+
 }

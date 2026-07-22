@@ -52,6 +52,20 @@ public struct TunnelControlResponse: Codable, Sendable, Equatable {
     }
 }
 
+/// A compact, ephemeral app-to-provider status response used to render the
+/// currently connected tunnel. It is deliberately limited to monotonic packet
+/// byte counters: diagnostic history continues to live in the binary flight
+/// recorder and lifecycle snapshot stores.
+public struct TunnelTrafficSnapshotV1: Codable, Sendable, Equatable {
+    public let outboundPacketBytes: UInt64
+    public let inboundPacketBytes: UInt64
+
+    public init(outboundPacketBytes: UInt64, inboundPacketBytes: UInt64) {
+        self.outboundPacketBytes = outboundPacketBytes
+        self.inboundPacketBytes = inboundPacketBytes
+    }
+}
+
 public enum TunnelRecoveryPolicy: Codable, Sendable, Equatable {
     case none
     case automatic(AutoTunnelRecoveryPolicy)
