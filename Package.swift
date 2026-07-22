@@ -27,23 +27,23 @@ let package = Package(
         ),
         .target(
             name: "FptnConnectionOrchestration",
-            dependencies: ["FptnSharedCore", "FptnServerSelection"]
+            dependencies: ["FptnSharedCore", "FptnSharedTunnel", "FptnServerSelection"]
         ),
         .target(
             name: "FptnSharedTestSupport",
-            dependencies: ["FptnSharedCore", "FptnServerSelection", "FptnConnectionOrchestration"]
+            dependencies: ["FptnSharedCore", "FptnSharedTunnel", "FptnServerSelection", "FptnConnectionOrchestration"]
         ),
         .testTarget(
             name: "FptnSharedCoreTests",
-            dependencies: ["FptnSharedCore", "FptnSharedTestSupport"]
+            dependencies: ["FptnSharedCore", "FptnSharedTunnel", "FptnSharedTestSupport"]
         ),
         .testTarget(
             name: "FptnConnectionOrchestrationTests",
-            dependencies: ["FptnConnectionOrchestration", "FptnSharedTestSupport"]
+            dependencies: ["FptnConnectionOrchestration", "FptnSharedTunnel", "FptnSharedTestSupport"]
         ),
         .testTarget(
             name: "FptnServerSelectionTests",
-            dependencies: ["FptnServerSelection", "FptnSharedTestSupport"]
+            dependencies: ["FptnServerSelection", "FptnSharedTunnel", "FptnSharedTestSupport"]
         )
     ]
 )

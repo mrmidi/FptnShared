@@ -1,5 +1,6 @@
 import XCTest
 @testable import FptnSharedCore
+import FptnSharedTunnel
 import FptnSharedTestSupport
 
 final class FptnSharedCoreTests: XCTestCase {

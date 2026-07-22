@@ -7,6 +7,7 @@ Distributed under the MIT License (https://opensource.org/licenses/MIT)
 import Foundation
 import Testing
 import FptnSharedCore
+import FptnSharedTunnel
 import FptnServerSelection
 import FptnConnectionOrchestration
 
@@ -58,8 +59,8 @@ struct TunnelRecoveryPolicyTests {
             "censorshipStrategy": "sni-reality-chrome147"
         }
         """.data(using: .utf8)!
-        #expect(throws: DecodingError.self) {
-            try JSONDecoder().decode(TunnelStartupConfiguration.self, from: json)
+        #expect(throws: TunnelStartupPayloadError.self) {
+            try JSONDecoder().decode(TunnelStartupConfigurationV1.self, from: json)
         }
     }
 }

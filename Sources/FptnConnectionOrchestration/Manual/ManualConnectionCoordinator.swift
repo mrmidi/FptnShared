@@ -6,6 +6,7 @@ Distributed under the MIT License (https://opensource.org/licenses/MIT)
 
 import Foundation
 import FptnSharedCore
+import FptnSharedTunnel
 import FptnServerSelection
 
 public actor ManualConnectionCoordinator: ManualConnectionCoordinating {
@@ -61,24 +62,31 @@ public actor ManualConnectionCoordinator: ManualConnectionCoordinating {
         state = .startingTunnel
         let episodeID = ConnectionEpisodeID()
         activeEpisodeID = episodeID
-        let config = TunnelStartupConfiguration(
-            episodeID: episodeID.rawValue,
-            recoveryPolicy: .none,
-            serverHost: bootstrap.server.host,
-            serverPort: bootstrap.server.port,
-            accessToken: bootstrap.accessToken,
-            dnsIPv4: bootstrap.dnsIPv4,
-            dnsIPv6: bootstrap.dnsIPv6,
-            sni: request.bootstrapContext.sni,
-            md5Fingerprint: bootstrap.server.md5Fingerprint,
-            censorshipStrategy: request.bootstrapContext.censorshipStrategy.rawValue
-        )
+        
+        let config: TunnelStartupConfigurationV1
+        do {
+            config = try TunnelStartupConfigurationV1(
+                episodeID: episodeID.rawValue,
+                recoveryPolicy: request.tunnelRecoveryPolicy,
+                serverHost: bootstrap.server.host,
+                serverPort: bootstrap.server.port,
+                accessToken: bootstrap.accessToken,
+                dnsIPv4: bootstrap.dnsIPv4,
+                dnsIPv6: bootstrap.dnsIPv6,
+                sni: request.bootstrapContext.sni,
+                md5Fingerprint: bootstrap.server.md5Fingerprint,
+                censorshipStrategy: request.bootstrapContext.censorshipStrategy
+            )
+        } catch {
+            state = .failed(ManualConnectionFailure(reason: "Failed to create startup configuration: \(error)"))
+            return .failed(.tunnelRefused("Invalid startup configuration"))
+        }
 
         let tunnelResult = await tunnelController.start(episodeID: episodeID, configuration: config)
 
         guard attempt == generation, !Task.isCancelled else {
             if activeEpisodeID == episodeID { activeEpisodeID = nil }
-            await tunnelController.stop(episodeID: episodeID)
+            await tunnelController.stop(episodeID: episodeID, initiator: .appDisconnect)
             return .cancelled
         }
 
@@ -103,7 +111,7 @@ public actor ManualConnectionCoordinator: ManualConnectionCoordinating {
         activeEpisodeID = nil
         state = .disconnecting
         if let episodeID {
-            await tunnelController.stop(episodeID: episodeID)
+            await tunnelController.stop(episodeID: episodeID, initiator: .appDisconnect)
         }
         state = .disconnected(.userInitiated)
     }

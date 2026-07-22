@@ -39,11 +39,18 @@ public struct SelectionRun: Sendable {
     public let result: AutoSelectionResult
     public let observations: [ServerHealthObservation]
     public let statistics: SelectionRunStatistics
+    public let selectionSource: SelectionSource
 
-    public init(result: AutoSelectionResult, observations: [ServerHealthObservation], statistics: SelectionRunStatistics) {
+    public init(
+        result: AutoSelectionResult,
+        observations: [ServerHealthObservation],
+        statistics: SelectionRunStatistics,
+        selectionSource: SelectionSource = .liveRace
+    ) {
         self.result = result
         self.observations = observations
         self.statistics = statistics
+        self.selectionSource = selectionSource
     }
 }
 

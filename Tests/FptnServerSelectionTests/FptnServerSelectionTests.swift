@@ -7,6 +7,7 @@ Distributed under the MIT License (https://opensource.org/licenses/MIT)
 import Foundation
 import Testing
 import FptnSharedCore
+import FptnSharedTunnel
 import FptnServerSelection
 import FptnSharedTestSupport
 

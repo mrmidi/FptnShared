@@ -6,6 +6,7 @@ Distributed under the MIT License (https://opensource.org/licenses/MIT)
 
 import Foundation
 import FptnSharedCore
+import FptnSharedTunnel
 import FptnServerSelection
 
 public typealias Clock = FptnSharedCore.Clock
@@ -16,8 +17,8 @@ public enum TunnelStartError: Error, Sendable {
 }
 
 public protocol TunnelControlling: Sendable {
-    func start(episodeID: ConnectionEpisodeID, configuration: TunnelStartupConfiguration) async -> Result<Void, TunnelStartError>
-    func stop(episodeID: ConnectionEpisodeID) async
+    func start(episodeID: ConnectionEpisodeID, configuration: TunnelStartupConfigurationV1) async -> Result<Void, TunnelStartError>
+    func stop(episodeID: ConnectionEpisodeID, initiator: TunnelStopInitiator) async
 }
 
 public struct ManualConnectionDependencies {

@@ -8,20 +8,20 @@ import Foundation
 import FptnSharedCore
 
 public actor AutoServerSelector: AutoSelecting {
-    private let policy: SelectionPolicy
+    private let overridePolicy: SelectionPolicy?
     private let healthStore: ServerHealthStore
     private let healthPolicy: ServerHealthPolicy
     private let bootstrapper: any ServerBootstrapping
     private let clock: any Clock
 
     public init(
-        policy: SelectionPolicy = .production,
+        policy: SelectionPolicy? = nil,
         healthStore: ServerHealthStore,
         healthPolicy: ServerHealthPolicy = .production,
         bootstrapper: any ServerBootstrapping,
         clock: any Clock = SystemClock()
     ) {
-        self.policy = policy
+        self.overridePolicy = policy
         self.healthStore = healthStore
         self.healthPolicy = healthPolicy
         self.bootstrapper = bootstrapper
@@ -29,21 +29,53 @@ public actor AutoServerSelector: AutoSelecting {
     }
 
     public func select(_ request: SelectionRequest) async -> SelectionRun {
+        let activePolicy = overridePolicy ?? request.selectionPolicy
+        let startTime = clock.now()
         let ordered = await CandidateOrderer().order(request.servers, using: healthStore, context: request.context)
 
         let race = SlidingWindowRace()
-        let execution = await race.run(
+        var execution = await race.run(
             candidates: ordered,
             credentials: request.credentials,
             context: request.context,
             bootstrapPolicy: request.bootstrapPolicy,
-            selectionPolicy: policy,
+            selectionPolicy: activePolicy,
             clock: clock,
             bootstrapper: bootstrapper
         )
 
+        var selectionSource: SelectionSource = .liveRace
+
+        if execution.winner == nil && execution.termination == .selectionDeadline {
+            let elapsedTime = clock.now() - startTime
+            let remainingBudget = activePolicy.overallSelectionDeadline - elapsedTime
+            if remainingBudget > .zero {
+                let fallback = CachedFallbackSelection(
+                    healthStore: healthStore,
+                    bootstrapper: bootstrapper,
+                    clock: clock
+                )
+                if let fallbackWinner = await fallback.fallbackBootstrap(
+                    candidates: request.servers,
+                    credentials: request.credentials,
+                    context: request.context,
+                    bootstrapPolicy: request.bootstrapPolicy,
+                    executedAttempts: execution.attempts,
+                    budget: remainingBudget
+                ) {
+                    execution = RaceExecution(
+                        winner: fallbackWinner,
+                        attempts: execution.attempts,
+                        statistics: execution.statistics,
+                        termination: .winner
+                    )
+                    selectionSource = .cachedCandidateBootstrap
+                }
+            }
+        }
+
         let observations = execution.attempts.map { ServerHealthObservation.from($0.result) }
-        let result = aggregateOutcome(execution, observations: observations)
+        let result = aggregateOutcome(execution, observations: observations, policy: activePolicy)
 
         let updates = healthPolicy.updates(from: observations)
         if !updates.isEmpty {
@@ -61,13 +93,15 @@ public actor AutoServerSelector: AutoSelecting {
                 peakActiveProbes: execution.statistics.peakActiveProbes,
                 timeToWinnerMs: execution.statistics.timeToWinnerMs,
                 deadlineTriggered: execution.termination == .selectionDeadline
-            )
+            ),
+            selectionSource: selectionSource
         )
     }
 
     private func aggregateOutcome(
         _ execution: RaceExecution,
-        observations: [ServerHealthObservation]
+        observations: [ServerHealthObservation],
+        policy: SelectionPolicy
     ) -> AutoSelectionResult {
         if let winner = execution.winner {
             return .success(winner)

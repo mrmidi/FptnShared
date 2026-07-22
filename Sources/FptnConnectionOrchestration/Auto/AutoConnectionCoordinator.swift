@@ -6,6 +6,7 @@ Distributed under the MIT License (https://opensource.org/licenses/MIT)
 
 import Foundation
 import FptnSharedCore
+import FptnSharedTunnel
 import FptnServerSelection
 
 public actor AutoConnectionCoordinator: AutoConnectionCoordinating {
@@ -16,6 +17,8 @@ public actor AutoConnectionCoordinator: AutoConnectionCoordinating {
     private var state: AutoConnectionState = .idle
     private var generation: UInt64 = 0
     private var activeEpisodeID: ConnectionEpisodeID?
+    private var lastRequest: AutoConnectionRequest?
+    private var remainingReplacementAttempts: Int = 0
 
     public init(
         selector: any AutoSelecting,
@@ -29,8 +32,12 @@ public actor AutoConnectionCoordinator: AutoConnectionCoordinating {
 
     public func connect(_ request: AutoConnectionRequest) async -> ConnectionStartResult {
         generation &+= 1
-        let attempt = generation
+        lastRequest = request
+        remainingReplacementAttempts = request.reselectionPolicy.maxReplacementAttempts
+        return await executeSelectionAndConnect(request, attempt: generation)
+    }
 
+    private func executeSelectionAndConnect(_ request: AutoConnectionRequest, attempt: UInt64) async -> ConnectionStartResult {
         state = .selecting
 
         let selectionRequest = SelectionRequest(
@@ -38,7 +45,7 @@ public actor AutoConnectionCoordinator: AutoConnectionCoordinating {
             credentials: request.credentials,
             context: request.bootstrapContext,
             bootstrapPolicy: request.bootstrapPolicy,
-            selectionPolicy: .production
+            selectionPolicy: request.selectionPolicy
         )
 
         let run = await selector.select(selectionRequest)
@@ -52,23 +59,31 @@ public actor AutoConnectionCoordinator: AutoConnectionCoordinating {
             state = .startingTunnel
             let episodeID = ConnectionEpisodeID()
             activeEpisodeID = episodeID
-            let config = TunnelStartupConfiguration(
-                episodeID: episodeID.rawValue,
-                recoveryPolicy: .automatic(AutoTunnelRecoveryPolicy(sameServerAttempts: 2, reconnectDelaySeconds: 2)),
-                serverHost: bootstrap.server.host,
-                serverPort: bootstrap.server.port,
-                accessToken: bootstrap.accessToken,
-                dnsIPv4: bootstrap.dnsIPv4,
-                dnsIPv6: bootstrap.dnsIPv6,
-                sni: request.bootstrapContext.sni,
-                md5Fingerprint: bootstrap.server.md5Fingerprint,
-                censorshipStrategy: request.bootstrapContext.censorshipStrategy.rawValue
-            )
+
+            let config: TunnelStartupConfigurationV1
+            do {
+                config = try TunnelStartupConfigurationV1(
+                    episodeID: episodeID.rawValue,
+                    recoveryPolicy: request.tunnelRecoveryPolicy,
+                    serverHost: bootstrap.server.host,
+                    serverPort: bootstrap.server.port,
+                    accessToken: bootstrap.accessToken,
+                    dnsIPv4: bootstrap.dnsIPv4,
+                    dnsIPv6: bootstrap.dnsIPv6,
+                    sni: request.bootstrapContext.sni,
+                    md5Fingerprint: bootstrap.server.md5Fingerprint,
+                    censorshipStrategy: request.bootstrapContext.censorshipStrategy
+                )
+            } catch {
+                state = .failed(.internalError("Invalid startup configuration"))
+                return .failed(.tunnelRefused("Invalid startup configuration"))
+            }
+
             let tunnelResult = await tunnelController.start(episodeID: episodeID, configuration: config)
 
             guard attempt == generation, !Task.isCancelled else {
                 if activeEpisodeID == episodeID { activeEpisodeID = nil }
-                await tunnelController.stop(episodeID: episodeID)
+                await tunnelController.stop(episodeID: episodeID, initiator: .appDisconnect)
                 return .cancelled
             }
 
@@ -112,9 +127,11 @@ public actor AutoConnectionCoordinator: AutoConnectionCoordinating {
         generation &+= 1
         let episodeID = activeEpisodeID
         activeEpisodeID = nil
+        lastRequest = nil
+        remainingReplacementAttempts = 0
         state = .disconnecting
         if let episodeID {
-            await tunnelController.stop(episodeID: episodeID)
+            await tunnelController.stop(episodeID: episodeID, initiator: .appDisconnect)
         }
         state = .idle
     }
@@ -127,23 +144,46 @@ public actor AutoConnectionCoordinator: AutoConnectionCoordinating {
             switch stopReason {
             case .userInitiated:
                 state = .idle
+                lastRequest = nil
+
             case .authenticationFailed:
                 state = .failed(.authenticationRejected)
+                lastRequest = nil
+
             case .networkLost:
                 state = .waitingForNetwork
-            case .remoteClosed, .transportError:
-                state = .selectingReplacement
-            case .unknown:
-                state = .selectingReplacement
+
+            case .remoteClosed, .transportError, .unknown:
+                triggerReplacementSelection()
             }
 
         case .networkBecameSatisfied:
             if case .waitingForNetwork = state {
-                state = .selectingReplacement
+                triggerReplacementSelection()
             }
 
-        case .tunnelConnected, .networkBecameUnsatisfied:
+        case .networkBecameUnsatisfied:
+            if case .connected = state {
+                // Network lost while connected: transition to waitingForNetwork
+                state = .waitingForNetwork
+            }
+
+        case .tunnelConnected:
             break
+        }
+    }
+
+    private func triggerReplacementSelection() {
+        guard let request = lastRequest, remainingReplacementAttempts > 0 else {
+            state = .exhausted
+            return
+        }
+        remainingReplacementAttempts -= 1
+        state = .selectingReplacement
+        let currentAttempt = generation
+        Task { [weak self] in
+            guard let self else { return }
+            _ = await self.executeSelectionAndConnect(request, attempt: currentAttempt)
         }
     }
 
