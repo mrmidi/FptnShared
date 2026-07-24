@@ -102,6 +102,72 @@ public struct TunnelTrafficSnapshotV1: Codable, Sendable, Equatable {
     }
 }
 
+/// The full app-facing tunnel status returned by `getStatus`. Supersedes
+/// returning a bare `TunnelTrafficSnapshotV1`: it folds the exact traffic
+/// totals together with the memory, outbound-queue, packet-lease, and
+/// session-identity counters the Telemetry screen previously could only read
+/// from the durable binary lifecycle snapshot on a coarse ~15s cadence.
+///
+/// This travels on the same 1 Hz `getStatus` round-trip the app already makes
+/// while foregrounded, so the live screen no longer lags the tunnel by up to
+/// a snapshot interval, and the durable binary snapshot is demoted to a pure
+/// "last known state after the provider dies" fallback. Only the provider can
+/// report these while the app is backgrounded and not observing.
+public struct TunnelStatusSnapshotV1: Codable, Sendable, Equatable {
+    /// Exact session traffic totals + sampled peak bandwidth. See
+    /// `TunnelTrafficSnapshotV1`.
+    public let traffic: TunnelTrafficSnapshotV1
+
+    // Memory — sampled from the provider's Mach task info, in bytes.
+    public let memoryFootprintBytes: UInt64
+    public let memoryResidentBytes: UInt64
+    public let memoryFootprintPeakBytes: UInt64
+
+    // Outbound transport queue + native packet-lease health.
+    public let outboundQueuedBytes: UInt64
+    public let outboundQueuedBytesPeak: UInt64
+    public let queueFullCount: UInt64
+    public let livePacketLeases: UInt64
+    public let peakPacketLeases: UInt64
+    public let nativeActiveOperations: UInt32
+
+    // Session identity + recovery. `sessionToken` is a hash derived from the
+    // tunnel episode identifier, not the identifier itself.
+    public let sessionToken: UInt64
+    public let websocketGeneration: UInt32
+    public let reconnectAttempt: UInt32
+
+    public init(
+        traffic: TunnelTrafficSnapshotV1,
+        memoryFootprintBytes: UInt64,
+        memoryResidentBytes: UInt64,
+        memoryFootprintPeakBytes: UInt64,
+        outboundQueuedBytes: UInt64,
+        outboundQueuedBytesPeak: UInt64,
+        queueFullCount: UInt64,
+        livePacketLeases: UInt64,
+        peakPacketLeases: UInt64,
+        nativeActiveOperations: UInt32,
+        sessionToken: UInt64,
+        websocketGeneration: UInt32,
+        reconnectAttempt: UInt32
+    ) {
+        self.traffic = traffic
+        self.memoryFootprintBytes = memoryFootprintBytes
+        self.memoryResidentBytes = memoryResidentBytes
+        self.memoryFootprintPeakBytes = memoryFootprintPeakBytes
+        self.outboundQueuedBytes = outboundQueuedBytes
+        self.outboundQueuedBytesPeak = outboundQueuedBytesPeak
+        self.queueFullCount = queueFullCount
+        self.livePacketLeases = livePacketLeases
+        self.peakPacketLeases = peakPacketLeases
+        self.nativeActiveOperations = nativeActiveOperations
+        self.sessionToken = sessionToken
+        self.websocketGeneration = websocketGeneration
+        self.reconnectAttempt = reconnectAttempt
+    }
+}
+
 public enum TunnelRecoveryPolicy: Codable, Sendable, Equatable {
     case none
     case automatic(AutoTunnelRecoveryPolicy)
