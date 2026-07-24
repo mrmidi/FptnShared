@@ -25,8 +25,13 @@ final class FptnSharedCoreTests: XCTestCase {
 
     func testTunnelTrafficSnapshotRoundTrip() throws {
         let snapshot = TunnelTrafficSnapshotV1(
-            outboundPacketBytes: 12_345,
-            inboundPacketBytes: 67_890
+            sessionUploadBytes: 12_345,
+            sessionDownloadBytes: 67_890,
+            peakUploadBytesPerSecond: 5_000,
+            peakDownloadBytesPerSecond: 60_000,
+            peakBandwidthNominalWindowSeconds: 15,
+            sessionStartMonotonicTime: 1_000,
+            sampleMonotonicTime: 2_000
         )
         let data = try JSONEncoder().encode(snapshot)
         let decoded = try JSONDecoder().decode(TunnelTrafficSnapshotV1.self, from: data)
